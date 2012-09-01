@@ -5,8 +5,8 @@ Version: 0.2.4
 Usage:   iteres <command> [options]
 
 Command: 
-         stat        get repeat alignment statistics
+stat        get repeat alignment statistics
 
-         filter      filter alignment statistic on repName/repFamily/repClass
+filter      filter alignment statistic on repName/repFamily/repClass
          
-         nearby      fetch nearby genes for locations from bed file
+nearby      fetch nearby genes for locations from bed file
