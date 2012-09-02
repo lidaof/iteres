@@ -6,7 +6,7 @@
 #include "obscure.h"
 #include "jksql.h"
 #include "sam.h"
-#define ITERES_VERSION "0.2.4"
+#define ITERES_VERSION "0.2.5"
 
 //struct hold contens from rmsk line
 struct rmsk {
@@ -22,6 +22,18 @@ struct rep {
     unsigned long long int read_count, genome_count, total_length;
     unsigned int length;
     unsigned int *bp_total;
+};
+
+//struct hold contents for repeat family
+struct repfam {
+    char *fname, *cname;
+    unsigned long long int read_count, genome_count, total_length;
+};
+
+//struct hold contents for repeat class
+struct repcla {
+    char *cname;
+    unsigned long long int read_count, genome_count, total_length;
 };
 
 /* definitions of functions */
@@ -60,16 +72,16 @@ void writeReport(char *outfile, unsigned long long int *cnt, unsigned int mapQ, 
     carefulClose(&f);
 }
 
-void writeWigandStat(struct hash *hash, char *of1, char *of2, unsigned long long int reads_num){
+void writeWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash2, char *of1, char *of2, char *of3, char *of4, unsigned long long int reads_num){
     FILE *f1 = mustOpen(of1, "w");
     FILE *f2 = mustOpen(of2, "w");
     unsigned int m;
     struct hashEl *helr;
     struct hashCookie cookier = hashFirst(hash);
-    fprintf(f1, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "#subfamily", "class", "family", "length", "reads_count", "total_length", "genome_count", "RPKM", "RPM");
+    fprintf(f1, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "#subfamily", "family", "class", "consensus_length", "reads_count", "total_length", "genome_count", "RPKM", "RPM");
     while ( (helr = hashNext(&cookier)) != NULL ) {
         struct rep *or = (struct rep *) (helr->val);
-        fprintf(f1, "%s\t%s\t%s\t%u\t%llu\t%llu\t%llu\t%.3f\t%.3f\n", or->name, or->cname, or->fname, or->length, or->read_count, or->total_length, or->genome_count, cal_rpkm(or->read_count, or->total_length, reads_num), cal_rpm(or->read_count, reads_num));
+        fprintf(f1, "%s\t%s\t%s\t%u\t%llu\t%llu\t%llu\t%.3f\t%.3f\n", or->name, or->fname, or->cname, or->length, or->read_count, or->total_length, or->genome_count, cal_rpkm(or->read_count, or->total_length, reads_num), cal_rpm(or->read_count, reads_num));
         if (or->length != 0){
             fprintf(f2, "fixedStep chrom=%s start=1 step=1 span=1\n", or->name);
             for (m = 0; m < or->length; m++) 
@@ -78,9 +90,27 @@ void writeWigandStat(struct hash *hash, char *of1, char *of2, unsigned long long
     }
     carefulClose(&f2);
     carefulClose(&f1);
+    FILE *f3 = mustOpen(of3, "w");
+    struct hashEl *hel3;
+    struct hashCookie cookier3 = hashFirst(hash1);
+    fprintf(f3, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "#family", "class", "reads_count", "total_length", "genome_count", "RPKM", "RPM");
+    while ( (hel3 = hashNext(&cookier3)) != NULL) {
+        struct repfam *or = (struct repfam *) hel3->val;
+        fprintf(f3, "%s\t%s\t%llu\t%llu\t%llu\t%.3f\t%.3f\n", or->fname, or->cname, or->read_count, or->total_length, or->genome_count, cal_rpkm(or->read_count, or->total_length, reads_num), cal_rpm(or->read_count, reads_num));
+    }
+    carefulClose(&f3);
+    FILE *f4 = mustOpen(of4, "w");
+    struct hashEl *hel4;
+    struct hashCookie cookier4 = hashFirst(hash2);
+    fprintf(f4, "%s\t%s\t%s\t%s\t%s\t%s\n",  "#class", "reads_count", "total_length", "genome_count", "RPKM", "RPM");
+    while ( (hel4 = hashNext(&cookier4)) != NULL) {
+        struct repcla *or = (struct repcla *) hel4->val;
+        fprintf(f4, "%s\t%llu\t%llu\t%llu\t%.3f\t%.3f\n", or->cname, or->read_count, or->total_length, or->genome_count, cal_rpkm(or->read_count, or->total_length, reads_num), cal_rpm(or->read_count, reads_num));
+    }
+    carefulClose(&f4);
 }
 
-unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, int isSam, unsigned int mapQ, int filter, int rmDup) {
+unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr) {
     samfile_t *samfp;
     char chr[100], prn[500], key[100];
     unsigned int start, end, cend, rstart, rend;
@@ -116,15 +146,16 @@ unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrH
             continue;
         mapped_reads_num++;
         //change chr name to chr1, chr2 ...
-        if (startsWith("GL", h->target_name[b->core.tid])) {
-            continue;
-        } else if (sameWord(h->target_name[b->core.tid], "MT")) {
-            strcpy(chr,"chrM");
-        } else if (!startsWith("chr", h->target_name[b->core.tid])) {
-            strcpy(chr, "chr");
-            strcat(chr, h->target_name[b->core.tid]);
-        } else {
-            strcpy(chr, h->target_name[b->core.tid]);
+        strcpy(chr, h->target_name[b->core.tid]);
+        if (addChr){
+            if (startsWith("GL", h->target_name[b->core.tid])) {
+                continue;
+            } else if (sameWord(h->target_name[b->core.tid], "MT")) {
+                strcpy(chr,"chrM");
+            } else if (!startsWith("chr", h->target_name[b->core.tid])) {
+                strcpy(chr, "chr");
+                strcat(chr, h->target_name[b->core.tid]);
+            }
         }
         struct hashEl *he = hashLookup(nochr, chr);
         if (he != NULL)
@@ -151,7 +182,8 @@ unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrH
         }
         unique_reads++;
         //transfer coordinates
-        end = min(cend, (unsigned int)b->core.pos + qlen);
+        int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + qlen;
+        end = min(cend, (unsigned int)tmpend);
         struct binElement *hitList = NULL, *hit;
         struct hashEl *hel2 = hashLookup(hashRmsk, chr);
         if (hel2 != NULL) {
@@ -181,6 +213,18 @@ unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrH
                                     (rs->bp_total)[j]++;
                                 }
                             }
+                        }
+                        //fill hashFam
+                        struct hashEl *hel4 = hashLookup(hashFam, ss->fname);
+                        if (hel4 != NULL) {
+                            struct repfam *fs = (struct repfam *) hel4->val;
+                            fs->read_count++;
+                        }
+                        //fill hashCla
+                        struct hashEl *hel5 = hashLookup(hashCla, ss->cname);
+                        if (hel5 != NULL) {
+                            struct repcla *cs = (struct repcla *) hel5->val;
+                            cs->read_count++;
                         }
                     } else {
                         slNameAddHead(&(ss->sl), bam1_qname(b));
@@ -212,13 +256,15 @@ void freermsk(struct rmsk *s){
     free(s);
 }
 
-void rmsk2binKeeperHash(char *rmskfile, struct hash *chrHash, struct hash *repHash, struct hash **hashRmsk, struct hash **hashRep, int filterField, char *filterName){
+void rmsk2binKeeperHash(char *rmskfile, struct hash *chrHash, struct hash *repHash, struct hash **hashRmsk, struct hash **hashRep, struct hash **hashFam, struct hash **hashCla, int filterField, char *filterName){
     char strand;
     char *row[17];
     struct lineFile *repeat_stream = lineFileOpen(rmskfile, TRUE);
     int repeat_num = 0;
-    struct hash *hash1 = newHash(0);
-    struct hash *hash2 = newHash(0);
+    struct hash *hash1 = newHash(0); //hashRmsk
+    struct hash *hash2 = newHash(0); //hashRep
+    struct hash *hash3 = newHash(0); //hashFam
+    struct hash *hash4 = newHash(0); //hashCla
     while( lineFileNextRow(repeat_stream, row, ArraySize(row))){
         if (filterField != 0){
             if (strcmp(filterName, row[filterField]) != 0)
@@ -280,6 +326,35 @@ void rmsk2binKeeperHash(char *rmskfile, struct hash *chrHash, struct hash *repHa
                 (ns->bp_total)[k] = 0;
             hashAdd(hash2, ns->name, ns);
         }
+        //fill hash3
+        struct hashEl *hel3 = hashLookup(hash3, s->fname);
+        if (hel3 != NULL) {
+            struct repfam *rr = (struct repfam *) hel3->val;
+            rr->genome_count++;
+            rr->total_length += s->length;
+        } else {
+            struct repfam *ns = malloc(sizeof(struct repfam));
+            ns->fname = cloneString(s->fname);
+            ns->cname = cloneString(s->cname);
+            ns->genome_count = 1;
+            ns->total_length = s->length;
+            ns->read_count = 0;
+            hashAdd(hash3, ns->fname, ns);
+        }
+        //fill hash4
+        struct hashEl *hel4 = hashLookup(hash4, s->cname);
+        if (hel4 != NULL) {
+            struct repcla *rr = (struct repcla *) hel4->val;
+            rr->genome_count++;
+            rr->total_length += s->length;
+        } else {
+            struct repcla *ns = malloc(sizeof(struct repcla));
+            ns->cname = cloneString(s->cname);
+            ns->genome_count = 1;
+            ns->total_length = s->length;
+            ns->read_count = 0;
+            hashAdd(hash4, ns->cname, ns);
+        }
     }
     lineFileClose(&repeat_stream);
     if (filterField == 0){
@@ -291,6 +366,8 @@ void rmsk2binKeeperHash(char *rmskfile, struct hash *chrHash, struct hash *repHa
     }
     *hashRmsk = hash1;
     *hashRep = hash2;
+    *hashFam = hash3;
+    *hashCla = hash4;
 }
 
 void writeFilterOut(struct hash *hash, char *out, int readlist, int threshold, char *subfam, unsigned long long int reads_num){ 
@@ -334,12 +411,14 @@ void writeFilterOut(struct hash *hash, char *out, int readlist, int threshold, c
 
 int stat_usage(){
     fprintf(stderr, "\n");
+    fprintf(stderr, "Obtain alignment statistics for each repeat subfamily, family and class.\n\n");
     fprintf(stderr, "Usage:   iteres stat [options] <chromosome size file> <repeat size file> <rmsk.txt> <bam/sam alignment file>\n\n");
     fprintf(stderr, "Options: -S       input is SAM [off]\n");
     fprintf(stderr, "         -Q       mapping Quality threshold [0]\n");
     fprintf(stderr, "         -N       normalized by number of (0: repeat reads, 1: non-redundant reads, 2: mapped reads, 3: total reads) [0])\n");
     fprintf(stderr, "         -D       remove redundant reads [off]\n");
     fprintf(stderr, "         -w       keep the wiggle file [0]\n");
+    fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
     fprintf(stderr, "         -o       output prefix [basename of input without extension]\n");
     fprintf(stderr, "         -h       help message\n");
     fprintf(stderr, "         -?       help message\n");
@@ -350,22 +429,25 @@ int stat_usage(){
 /* main stat funtion */
 int main_stat (int argc, char *argv[]) {
     
-    char *output, *outReport, *outWig, *outbigWig, *outStat;
+    char *output, *outReport, *outWig, *outbigWig, *outStat, *outFam, *outCla;
     unsigned long long int *cnt;
-    int optSam = 0, optkeepWig = 0, c, optDup = 0;
+    int optSam = 0, optkeepWig = 0, c, optDup = 0, optaddChr = 0;
     unsigned int optQual = 0, optNorm = 0;
     char *optoutput = NULL;
     time_t start_time, end_time;
     struct hash *hashRmsk = newHash(0);
     struct hash *hashRep = newHash(0);
+    struct hash *hashFam = newHash(0);
+    struct hash *hashCla = newHash(0);
     start_time = time(NULL);
-    while ((c = getopt(argc, argv, "SQ:N:Dwo:h?")) >= 0) {
+    while ((c = getopt(argc, argv, "SQ:N:DwCo:h?")) >= 0) {
         switch (c) {
             case 'S': optSam = 1; break;
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
             case 'N': optNorm = (unsigned int)strtol(optarg, 0, 0); break;
             case 'D': optDup = 1; break;
             case 'w': optkeepWig = 1; break;
+            case 'C': optaddChr = 1; break;
             case 'o': optoutput = strdup(optarg); break;
             case 'h':
             case '?': return stat_usage(); break;
@@ -392,7 +474,11 @@ int main_stat (int argc, char *argv[]) {
         errAbort("Mem Error.\n");
     if (asprintf(&outReport, "%s.iteres.report", output) < 0)
         errAbort("Preparing output wrong");
-    if (asprintf(&outStat, "%s.iteres.stat", output) < 0)
+    if (asprintf(&outStat, "%s.iteres.subfamily.stat", output) < 0)
+        errAbort("Preparing output wrong");
+    if (asprintf(&outFam, "%s.iteres.family.stat", output) < 0)
+        errAbort("Preparing output wrong");
+    if (asprintf(&outCla, "%s.iteres.class.stat", output) < 0)
         errAbort("Preparing output wrong");
     
     int nindex = 0;
@@ -412,14 +498,14 @@ int main_stat (int argc, char *argv[]) {
     struct hash *repHash = hashNameIntFile(rep_size_file);
     
     fprintf(stderr, "* Start to parse the rmsk file\n");
-    rmsk2binKeeperHash(rmsk_file, chrHash, repHash, &hashRmsk, &hashRep, 0, "ALL");
+    rmsk2binKeeperHash(rmsk_file, chrHash, repHash, &hashRmsk, &hashRep, &hashFam, &hashCla, 0, "ALL");
     
     //sam file
     fprintf(stderr, "* Start to parse the SAM/BAM file\n");
-    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, optSam, optQual, 0, optDup);
+    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr);
 
     fprintf(stderr, "* Writing stats and Wig file\n");
-    writeWigandStat(hashRep, outStat, outWig, cnt[nindex]);
+    writeWigandStat(hashRep, hashFam, hashCla, outStat, outWig, outFam, outCla, cnt[nindex]);
 
     fprintf(stderr, "* Generating bigWig files\n");
     bigWigFileCreate(outWig, rep_size_file, 256, 1024, 0, 1, outbigWig);
@@ -436,10 +522,14 @@ int main_stat (int argc, char *argv[]) {
     hashFree(&repHash);
     hashFree(&hashRmsk);
     hashFree(&hashRep);
+    hashFree(&hashFam);
+    hashFree(&hashCla);
     free(outWig);
     free(outbigWig);
     free(outReport);
     free(outStat);
+    free(outFam);
+    free(outCla);
     end_time = time(NULL);
     fprintf(stderr, "* Done, time used %.0f seconds.\n", difftime(end_time, start_time));
     return 0;
@@ -447,6 +537,7 @@ int main_stat (int argc, char *argv[]) {
 
 int filter_usage(){
     fprintf(stderr, "\n");
+    fprintf(stderr, "Obtain alignment statistics of individual loci of each repeat subfamily, family or class.\n\n");
     fprintf(stderr, "Usage:   iteres filter [options] <chromosome size file> <repeat size file> <rmsk.txt> <bam/sam alignment file>\n\n");
     fprintf(stderr, "Options: -S       input is SAM [off]\n");
     fprintf(stderr, "         -Q       mapping Quality threshold [10]\n");
@@ -457,6 +548,7 @@ int filter_usage(){
     fprintf(stderr, "         -t       only output repeats have more than [1] reads mapped\n");
     fprintf(stderr, "         -r       output the list of reads [off]\n");
     fprintf(stderr, "         -D       remove redundant reads [off]\n");
+    fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
     fprintf(stderr, "         -o       output prefix [basename of input without extension]\n");
     fprintf(stderr, "         -h       help message\n");
     fprintf(stderr, "         -?       help message\n");
@@ -470,15 +562,17 @@ int main_filter(int argc, char *argv[]){
     unsigned long long int *cnt;
     struct hash *hashRmsk = newHash(0);
     struct hash *hashRep = newHash(0);
+    struct hash *hashFam = newHash(0);
+    struct hash *hashCla = newHash(0);
     int optSam = 0, optthreshold = 1;
     char *optoutput = NULL, *optname = NULL, *optclass = NULL, *optfamily = NULL;
     unsigned int optreadlist = 0, optQual = 10;
-    int filterField = 0, c, optDup = 0, optNorm = 1;
+    int filterField = 0, c, optDup = 0, optNorm = 1, optaddChr = 0;
     
     time_t start_time, end_time;
     start_time = time(NULL);
     
-    while ((c = getopt(argc, argv, "SQ:N:n:c:f:rDt:o:h?")) >= 0) {
+    while ((c = getopt(argc, argv, "SQ:N:n:c:f:rDt:Co:h?")) >= 0) {
         switch (c) {
             case 'S': optSam = 1; break;
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
@@ -486,6 +580,7 @@ int main_filter(int argc, char *argv[]){
             case 't': optthreshold = (unsigned int)strtol(optarg, 0, 0); break;
             case 'r': optreadlist = 1; break;
             case 'D': optDup = 1; break;
+            case 'C': optaddChr = 1; break;
             case 'n': optname = strdup(optarg); break;
             case 'c': optclass = strdup(optarg); break;
             case 'f': optfamily = strdup(optarg); break;
@@ -551,11 +646,11 @@ int main_filter(int argc, char *argv[]){
     struct hash *repHash = hashNameIntFile(rep_size_file);
     
     fprintf(stderr, "* Start to parse the rmsk file\n");
-    rmsk2binKeeperHash(rmsk_file, chrHash, repHash, &hashRmsk, &hashRep, filterField, subfam);
+    rmsk2binKeeperHash(rmsk_file, chrHash, repHash, &hashRmsk, &hashRep, &hashFam, &hashCla, filterField, subfam);
     
     //sam file
     fprintf(stderr, "* Start to parse the SAM/BAM file\n");
-    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, optSam, optQual, 1, optDup);
+    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr);
 
 
     fprintf(stderr, "* Preparing the output file\n");
@@ -574,6 +669,8 @@ int main_filter(int argc, char *argv[]){
     hashFree(&repHash);
     hashFree(&hashRmsk);
     hashFree(&hashRep);
+    hashFree(&hashFam);
+    hashFree(&hashCla);
     free(out);
     free(outReport);
     
@@ -584,6 +681,7 @@ int main_filter(int argc, char *argv[]){
 
 int nearby_usage(){
     fprintf(stderr, "\n");
+    fprintf(stderr, "Obtain nearby genes from locations listed in a bed file by querying UCSC database.\n\n");
     fprintf(stderr, "Usage:   iteres nearby [options] <bed file>\n\n");
     fprintf(stderr, "Options: -d       database to query [hg19]\n");
     fprintf(stderr, "         -n       output how many genes each direction [1]\n");
