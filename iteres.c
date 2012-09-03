@@ -6,7 +6,7 @@
 #include "obscure.h"
 #include "jksql.h"
 #include "sam.h"
-#define ITERES_VERSION "0.2.5"
+#define ITERES_VERSION "0.2.6"
 
 //struct hold contens from rmsk line
 struct rmsk {
@@ -112,7 +112,7 @@ void writeWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash2, 
 
 unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr) {
     samfile_t *samfp;
-    char chr[100], prn[500], key[100];
+    char chr[100], prn[500], key[100], strand;
     unsigned int start, end, cend, rstart, rend;
     unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 5);
     unsigned long long int mapped_reads_num = 0, reads_num = 0, reads_used = 0, unique_reads = 0, repeat_reads = 0;
@@ -167,11 +167,13 @@ unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrH
             continue;
         }
         reads_used++;
-        int i, qlen = b->core.l_qseq, j;
         start = (unsigned int) b->core.pos;
+        int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + b->core.l_qseq;
+        end = min(cend, (unsigned int)tmpend);
+        strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
         //remove dup first
         if (rmDup == 1){
-            if (sprintf(key, "%s:%u", chr, start) < 0)
+            if (sprintf(key, "%s:%u:%u:%c", chr, start, end, strand) < 0)
                 errAbort("Mem ERROR");
             struct hashEl *hel = hashLookup(dup, key);
             if (hel == NULL) {
@@ -182,8 +184,8 @@ unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrH
         }
         unique_reads++;
         //transfer coordinates
-        int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + qlen;
-        end = min(cend, (unsigned int)tmpend);
+        int i, j;
+        unsigned int qlen = end - start;
         struct binElement *hitList = NULL, *hit;
         struct hashEl *hel2 = hashLookup(hashRmsk, chr);
         if (hel2 != NULL) {
@@ -239,6 +241,184 @@ unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrH
     fprintf(stderr, "\r* Processed reads: %llu\n", reads_num);
     samclose(samfp);
     bam_destroy1(b);
+    freeHash(&nochr);
+    freeHash(&dup);
+    cnt[0] = reads_num;
+    cnt[1] = mapped_reads_num;
+    cnt[2] = reads_used;
+    cnt[3] = unique_reads;
+    cnt[4] = repeat_reads;
+    return cnt;
+}
+
+unsigned long long int *PEsamFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, unsigned int iSize) {
+    samfile_t *samfp;
+    char chr[100], prn[500], key[100], strand;
+    unsigned int start, end, cend, rstart, rend;
+    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 5);
+    unsigned long long int mapped_reads_num = 0, reads_num = 0, reads_used = 0, unique_reads = 0, repeat_reads = 0;
+    struct hash *nochr = newHash(0), *dup = newHash(0);
+    if (isSam) {
+        if ( (samfp = samopen(samfile, "r", 0)) == 0) {
+            fprintf(stderr, "Fail to open SAM file %s\n", samfile);
+            errAbort("Error\n");
+        }
+    } else {
+        if ( (samfp = samopen(samfile, "rb", 0)) == 0) {
+            fprintf(stderr, "Fail to open BAM file %s\n", samfile);
+            errAbort("Error\n");
+        }
+    }
+    strcpy(prn, "empty");
+    bam1_t *b[2];
+    int curr, has_prev;
+    bam_header_t *h;
+    h = samfp->header;
+    b[0] = bam_init1();
+    b[1] = bam_init1();
+    curr = 0;
+    has_prev = 0;
+    while ( samread(samfp, b[curr]) >= 0) {
+        
+	bam1_t *cur = b[curr], *pre = b[1-curr];
+	if (has_prev) {
+	    if (strcmp(bam1_qname(cur), bam1_qname(pre)) == 0) { // identical pair name
+		has_prev = 0;
+	    }
+	} else has_prev = 1;
+	curr = 1 - curr;
+        
+        if (!has_prev) {
+            if ( sameString (bam1_qname(cur), prn)) 
+                continue;
+        }
+        reads_num++;
+        if ((reads_num % 10000) == 0)
+            fprintf(stderr, "\r* Processed reads pair: %llu", reads_num);
+        if (!has_prev)
+            strcpy(prn, bam1_qname(cur));
+        if (has_prev){
+            if (cur->core.tid < 0 || pre->core.tid < 0)
+                continue;
+        }
+        if (has_prev){
+            if (cur->core.qual < mapQ || pre->core.qual < mapQ)
+                continue;
+        }
+        mapped_reads_num++;
+        if (has_prev) {
+            if (cur->core.tid != pre->core.tid)
+                continue;
+        }
+        if (has_prev) {
+            if (abs(pre->core.isize) > iSize || pre->core.isize == 0)
+            //if (abs(pre->core.isize) > iSize)
+                continue;
+            strcpy(chr, h->target_name[cur->core.tid]);
+            //change chr name to chr1, chr2 ...
+            if (addChr){
+                if (startsWith("GL", h->target_name[cur->core.tid])) {
+                    continue;
+                } else if (sameWord(h->target_name[cur->core.tid], "MT")) {
+                    strcpy(chr,"chrM");
+                } else if (!startsWith("chr", h->target_name[cur->core.tid])) {
+                    strcpy(chr, "chr");
+                    strcat(chr, h->target_name[cur->core.tid]);
+                }
+            }
+            struct hashEl *he = hashLookup(nochr, chr);
+            if (he != NULL)
+                continue;
+            cend = (unsigned int) (hashIntValDefault(chrHash, chr, 2) - 1);
+            if (cend == 1){
+                hashAddInt(nochr, chr, 1);
+                warn("* Warning: reads mapped to chromosome %s will be discarded as %s not existed in the chromosome size file", chr, chr);
+                continue;
+            }
+            reads_used++;
+            int tmpend;
+            if (pre->core.isize > 0){
+                start = (unsigned int) pre->core.pos;
+                strand = '+';
+                tmpend = start + pre->core.isize;
+            }else{
+                start = (unsigned int) cur->core.pos;
+                strand = '-';
+                tmpend = start - pre->core.isize;
+            }
+            end = min(cend, (unsigned int)tmpend);
+            //remove dup first
+            if (rmDup == 1){
+                if (sprintf(key, "%s:%u:%u:%c", chr, start, end, strand) < 0)
+                    errAbort("Mem ERROR");
+                struct hashEl *hel = hashLookup(dup, key);
+                if (hel == NULL) {
+                    hashAddInt(dup, key, 1);
+                } else {
+                    continue;
+                }
+            }
+            unique_reads++;
+            //transfer coordinates
+            int i, j;
+            unsigned int qlen = end - start;
+            struct binElement *hitList = NULL, *hit;
+            struct hashEl *hel2 = hashLookup(hashRmsk, chr);
+            if (hel2 != NULL) {
+                struct binKeeper *bs2 = (struct binKeeper *) hel2->val;
+                hitList = binKeeperFind(bs2, start, end);
+                if(hitList != NULL) {
+                    for (hit = hitList; hit !=NULL; hit = hit->next) {
+                        struct rmsk *ss = (struct rmsk *) hit->val;
+                        if (filter == 0){
+                            struct hashEl *hel3 = hashLookup(hashRep, ss->name);
+                            if (hel3 != NULL){
+                                struct rep *rs = (struct rep *) hel3->val;
+                                rs->read_count++;
+                                if (rs->length != 0){
+                                    rstart = start - ss->start;
+                                    rstart = (rstart < 0) ? 0 : rstart;
+                                    rend = rstart + qlen;
+                                    rend = (rend < ss->end) ? rend : ss->end;
+                                    for (i = rstart; i < rend; i++) {
+                                        j = i + ss->consensus_start;
+                                        if (j >= ss->consensus_end) {
+                                            break;
+                                        }
+                                        if (j >= rs->length) {
+                                            break;
+                                        }
+                                        (rs->bp_total)[j]++;
+                                    }
+                                }
+                            }
+                            //fill hashFam
+                            struct hashEl *hel4 = hashLookup(hashFam, ss->fname);
+                            if (hel4 != NULL) {
+                                struct repfam *fs = (struct repfam *) hel4->val;
+                                fs->read_count++;
+                            }
+                            //fill hashCla
+                            struct hashEl *hel5 = hashLookup(hashCla, ss->cname);
+                            if (hel5 != NULL) {
+                                struct repcla *cs = (struct repcla *) hel5->val;
+                                cs->read_count++;
+                            }
+                        } else {
+                            slNameAddHead(&(ss->sl), bam1_qname(cur));
+                        }
+                        break;
+                    }
+                    repeat_reads++;
+                    slFreeList(hitList);
+                }
+            }
+        }
+    }
+    fprintf(stderr, "\r* Processed reads pair: %llu\n", reads_num);
+    samclose(samfp);
+    bam_destroy1(b[0]);
+    bam_destroy1(b[1]);
     freeHash(&nochr);
     freeHash(&dup);
     cnt[0] = reads_num;
@@ -419,6 +599,8 @@ int stat_usage(){
     fprintf(stderr, "         -D       remove redundant reads [off]\n");
     fprintf(stderr, "         -w       keep the wiggle file [0]\n");
     fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
+    fprintf(stderr, "         -P       Input was paired end data [off]\n");
+    fprintf(stderr, "         -I       Insert length [1000] (force -P)\n");
     fprintf(stderr, "         -o       output prefix [basename of input without extension]\n");
     fprintf(stderr, "         -h       help message\n");
     fprintf(stderr, "         -?       help message\n");
@@ -431,8 +613,8 @@ int main_stat (int argc, char *argv[]) {
     
     char *output, *outReport, *outWig, *outbigWig, *outStat, *outFam, *outCla;
     unsigned long long int *cnt;
-    int optSam = 0, optkeepWig = 0, c, optDup = 0, optaddChr = 0;
-    unsigned int optQual = 0, optNorm = 0;
+    int optSam = 0, optkeepWig = 0, c, optDup = 0, optaddChr = 0, optPair = 0;
+    unsigned int optQual = 0, optNorm = 0, optisize = 1000;
     char *optoutput = NULL;
     time_t start_time, end_time;
     struct hash *hashRmsk = newHash(0);
@@ -440,7 +622,7 @@ int main_stat (int argc, char *argv[]) {
     struct hash *hashFam = newHash(0);
     struct hash *hashCla = newHash(0);
     start_time = time(NULL);
-    while ((c = getopt(argc, argv, "SQ:N:DwCo:h?")) >= 0) {
+    while ((c = getopt(argc, argv, "SQ:N:DwCo:PI:h?")) >= 0) {
         switch (c) {
             case 'S': optSam = 1; break;
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
@@ -448,6 +630,8 @@ int main_stat (int argc, char *argv[]) {
             case 'D': optDup = 1; break;
             case 'w': optkeepWig = 1; break;
             case 'C': optaddChr = 1; break;
+            case 'P': optPair = 1; break;
+            case 'I': optisize = (unsigned int)strtol(optarg, 0, 0); optPair = 1; break;
             case 'o': optoutput = strdup(optarg); break;
             case 'h':
             case '?': return stat_usage(); break;
@@ -494,6 +678,11 @@ int main_stat (int argc, char *argv[]) {
         errAbort("Wrong normalization method specified");
     }
     
+    //if (optPair){
+    //    if (optisize == 0)
+    //        optisize = 1000;
+    //}
+
     struct hash *chrHash = hashNameIntFile(chr_size_file);
     struct hash *repHash = hashNameIntFile(rep_size_file);
     
@@ -502,7 +691,11 @@ int main_stat (int argc, char *argv[]) {
     
     //sam file
     fprintf(stderr, "* Start to parse the SAM/BAM file\n");
-    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr);
+    if (optPair){
+        cnt = PEsamFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr, optisize);
+    } else {
+        cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr);
+    }
 
     fprintf(stderr, "* Writing stats and Wig file\n");
     writeWigandStat(hashRep, hashFam, hashCla, outStat, outWig, outFam, outCla, cnt[nindex]);
@@ -549,6 +742,8 @@ int filter_usage(){
     fprintf(stderr, "         -r       output the list of reads [off]\n");
     fprintf(stderr, "         -D       remove redundant reads [off]\n");
     fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
+    fprintf(stderr, "         -P       Input was paired end data [off]\n");
+    fprintf(stderr, "         -I       Insert length [1000] (force -P)\n");
     fprintf(stderr, "         -o       output prefix [basename of input without extension]\n");
     fprintf(stderr, "         -h       help message\n");
     fprintf(stderr, "         -?       help message\n");
@@ -566,13 +761,13 @@ int main_filter(int argc, char *argv[]){
     struct hash *hashCla = newHash(0);
     int optSam = 0, optthreshold = 1;
     char *optoutput = NULL, *optname = NULL, *optclass = NULL, *optfamily = NULL;
-    unsigned int optreadlist = 0, optQual = 10;
-    int filterField = 0, c, optDup = 0, optNorm = 1, optaddChr = 0;
+    unsigned int optreadlist = 0, optQual = 10, optisize = 1000;
+    int filterField = 0, c, optDup = 0, optNorm = 1, optaddChr = 0, optPair = 0;
     
     time_t start_time, end_time;
     start_time = time(NULL);
     
-    while ((c = getopt(argc, argv, "SQ:N:n:c:f:rDt:Co:h?")) >= 0) {
+    while ((c = getopt(argc, argv, "SQ:N:n:c:f:rDt:CPI:o:h?")) >= 0) {
         switch (c) {
             case 'S': optSam = 1; break;
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
@@ -584,6 +779,8 @@ int main_filter(int argc, char *argv[]){
             case 'n': optname = strdup(optarg); break;
             case 'c': optclass = strdup(optarg); break;
             case 'f': optfamily = strdup(optarg); break;
+            case 'P': optPair = 1; break;
+            case 'I': optisize = (unsigned int)strtol(optarg, 0, 0); optPair = 1; break;
             case 'o': optoutput = strdup(optarg); break;
             case 'h':
             case '?': return filter_usage(); break;
@@ -650,8 +847,11 @@ int main_filter(int argc, char *argv[]){
     
     //sam file
     fprintf(stderr, "* Start to parse the SAM/BAM file\n");
-    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr);
-
+    if (optPair){
+        cnt = PEsamFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr, optisize);
+    } else {
+        cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr);
+    }
 
     fprintf(stderr, "* Preparing the output file\n");
     if (asprintf(&out, "%s_%s.iteres.loci", output, subfam) < 0)
