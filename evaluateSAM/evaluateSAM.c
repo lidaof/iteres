@@ -5,7 +5,7 @@
 #include "binRange.h"
 #include "sam.h"
 
-const char *argp_program_version = "evaluateSAM 0.1";
+const char *argp_program_version = "evaluateSAM 0.1.1";
 
 const char *argp_program_bug_address = "<http://wang.wustl.edu>";
 
@@ -38,6 +38,14 @@ void freeSam(struct sam *sa) {
     free(sa->chr);
     free(sa->name);
     free(sa);
+}
+
+void freeRmsk(struct rmsk *r) {
+    free(r->chr);
+    free(r->name);
+    free(r->fname);
+    free(r->cname);
+    free(r);
 }
 
 char *get_filename_without_ext(char *filename) {
@@ -151,7 +159,7 @@ struct hash * read_in_rmsk (char *repeat_file) {
 int main (int argc, char *argv[]) {
     
     samfile_t *samfp;
-    char *output, *prn, *outerr, *outerr2;
+    char *output, prn[200], *outerr, *outerr2;
     int mapped_reads_num, reads_num, mapped_to_loc, mapped_to_subfam;
     struct arguments arguments;
     struct hash *hash = hashNew(0);
@@ -233,7 +241,7 @@ int main (int argc, char *argv[]) {
     fprintf(stderr, "* Start to parse the SAM/BAM file ...\n");
     
     //sam file
-    prn = cloneString("empty");
+    strcpy(prn, "empty");
     bam1_t *b = bam_init1();
     int readStart, readRealstart, t1count, t2count;
     while ( samread(samfp, b) >= 0) {
@@ -244,7 +252,7 @@ int main (int argc, char *argv[]) {
             continue;
         }
         reads_num++;
-        prn = cloneString(sa->name);
+        strcpy(prn, sa->name);
 
         if ( sameString(sa->chr, "*") ){
             freeSam(sa);
@@ -281,8 +289,9 @@ int main (int argc, char *argv[]) {
                             if (sameWord(ss->name, readRep)){
                                 mapped_to_subfam++;
                             } else {
-                                fprintf(outerrhandle, "%s\n", tmpreadname);
+                                fprintf(outerrhandle, "%s\t%s\n", tmpreadname, ss->name);
                             }
+                            //freeRmsk(ss);
                             break;
                         }
                         slFreeList(&hitList);
@@ -291,6 +300,10 @@ int main (int argc, char *argv[]) {
                     }
                 }
             }
+            freeMem(t1);
+            freeMem(t2);
+            freeMem(readChr);
+            freeMem(readRep);
         } else {
             char *readChr1, *readRep1;
             int readStart1;
@@ -309,21 +322,18 @@ int main (int argc, char *argv[]) {
                 if (sameWord(readRep1, readRep)){
                     mapped_to_subfam++;
                 } else{
-                    fprintf(outerrhandle, "%s\n", tmpreadname);
+                    fprintf(outerrhandle, "%s\t%s\n", tmpreadname, readRep1);
                 }
             }
+            freeMem(t3);
+            freeMem(readChr1);
+            freeMem(readRep1);
         }
         freeSam(sa);
-        freeMem(t1);
-        freeMem(t2);
         freeMem(tmpreadname);
-        freeMem(readChr);
-        freeMem(readRep);
     }
     bam_destroy1(b);
     samclose(samfp);
-
-    freeMem(prn);   
     
     fclose(outerrhandle);
     fclose(outerrhandle2);
