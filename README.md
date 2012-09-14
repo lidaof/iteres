@@ -1,4 +1,10 @@
-Utils
+#evaluateSAM
+
+Version 0.1.1
+  * memory bug fixed
+  * add 3 output
+
+#iteres
 
 Version 0.2.6
   * Paired-end bam/sam supported
