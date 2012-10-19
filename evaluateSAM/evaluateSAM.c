@@ -109,7 +109,8 @@ struct sam * fetch_sa (const bam1_t *b, void *data){
     s->length = 0;
     s->qual = 0;
     s->strand = '*';
-    if (b->core.tid < 0) return s;
+    //if (b->core.tid < 0) return s;
+    if (c->flag & BAM_FUNMAP) return s;
     for (i = l = 0; i < c->n_cigar; ++i) {
         int op = cigar[i]&0xf;
         if (op == BAM_CMATCH || op == BAM_CDEL || op == BAM_CREF_SKIP)
