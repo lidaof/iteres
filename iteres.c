@@ -390,7 +390,11 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                 if (strand == '+'){
                     end = min(start + extension, cend);
                 }else{
-                    start = max(end - extension, 0);
+                    if (start < extension)
+                        start = 0;
+                    else
+                        start = end - extension;
+                    //start = max(end - extension, 0);
                 }
             }
 
@@ -435,7 +439,11 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                         if (strand == '+'){
                             end = min(start + extension, cend);
                         }else{
-                            start = max(end - extension, 0);
+                            if (start < extension)
+                                start = 0;
+                            else
+                                start = end - extension;
+                            //start = max(end - extension, 0);
                         }
                     }
                 }
@@ -452,7 +460,11 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                 if (strand == '+'){
                     end = min(start + extension, cend);
                 }else{
-                    start = max(end - extension, 0);
+                    if (start < extension)
+                        start = 0;
+                    else
+                        start = end - extension;
+                    //start = max(end - extension, 0);
                 }
             }
         }
