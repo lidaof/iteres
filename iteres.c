@@ -73,9 +73,10 @@ void writeReport(char *outfile, unsigned long long int *cnt, unsigned int mapQ, 
     fprintf(f, "used read ends 1: %llu\n", cnt[4]);
     fprintf(f, "used read ends 2: %llu\n", cnt[5]);
     fprintf(f, "mappable reads (pair): %llu\n", cnt[6]);
-    fprintf(f, "unique reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
+    fprintf(f, "unique mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
     fprintf(f, "non-redundant reads (pair): %llu\n", cnt[8]);
     fprintf(f, "reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[9]);
+    fprintf(f, "unique mapped reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[10]);
     carefulClose(&f);
 }
 
@@ -271,11 +272,12 @@ float getCov(unsigned int aStart, unsigned int aEnd, unsigned int start, unsigne
     return cov;
 }
 
-unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, float minCoverage, int treat) {
+unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, float minCoverage, int treat, char *outbed, char *outbed_unique) {
     samfile_t *samfp;
+    FILE *outbed_f = NULL, *outbed_unique_f = NULL;
     char chr[100], key[100], strand;
     unsigned int start, end, cend, rstart, rend;
-    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 10);
+    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 11);
     //unsigned long long int mapped_reads_num = 0, reads_num = 0, reads_used = 0, unique_reads = 0, repeat_reads = 0;
     unsigned long long int read_end1 = 0, read_end2 = 0;
     unsigned long long int read_end1_mapped = 0, read_end2_mapped = 0;
@@ -284,6 +286,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
     unsigned long long int reads_mapped = 0;
     unsigned long long int reads_mapped_unique = 0;
     unsigned long long int reads_repeat = 0;
+    unsigned long long int reads_repeat_unique = 0;
     struct hash *nochr = newHash(0), *dup = newHash(0);
     if (isSam) {
         if ( (samfp = samopen(samfile, "r", 0)) == 0) {
@@ -297,6 +300,10 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
         }
     }
     //strcpy(prn, "empty");
+    if (outbed != NULL)
+        outbed_f = mustOpen(outbed, "w");
+    if (outbed_unique != NULL)
+        outbed_unique_f = mustOpen(outbed_unique, "w");
     bam1_t *b;
     bam_header_t *h;
     h = samfp->header;
@@ -462,6 +469,14 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
             }
         }
         reads_nonredundant++;
+        //output bed
+        if (outbed_f)
+            fprintf(outbed_f, "%s\t%u\t%u\t%s\t%i\t%c\n", chr, start, end, bam1_qname(b), b->core.qual, strand);
+        if (outbed_unique_f){
+            if(b->core.qual >= mapQ)
+                fprintf(outbed_unique_f, "%s\t%u\t%u\t%s\t%i\t%c\n", chr, start, end, bam1_qname(b), b->core.qual, strand);
+        }
+
         //transfer coordinates
         int i, j;
         int index = 0, tindex = 0;
@@ -543,6 +558,8 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                         slNameAddHead(&(ss->sl_unique), bam1_qname(b));
                 }
                 reads_repeat++;
+                if (b->core.qual >= mapQ)
+                    reads_repeat_unique++;
                 slFreeList(hitList);
             }
         }
@@ -552,6 +569,10 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
     bam_destroy1(b);
     freeHash(&nochr);
     freeHash(&dup);
+    if (outbed_f)
+        carefulClose(&outbed_f);
+    if (outbed_unique_f)
+        carefulClose(&outbed_unique_f);
     cnt[0] = read_end1;
     cnt[1] = read_end2;
     cnt[2] = read_end1_mapped;
@@ -562,6 +583,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
     cnt[7] = reads_mapped_unique;
     cnt[8] = reads_nonredundant;
     cnt[9] = reads_repeat;
+    cnt[10] = reads_repeat_unique;
     return cnt;
 }
 
@@ -919,11 +941,13 @@ int stat_usage(){
     fprintf(stderr, "         -Q       unique reads mapping Quality threshold [10]\n");
     fprintf(stderr, "         -c       coverage threshold for overlapping [0.0001]\n");
     fprintf(stderr, "         -N       normalized by number of (0: reads in repeats, 1: non-redundant reads, 2: mapped reads, 3: total reads) [0])\n");
-    fprintf(stderr, "         -U       unique reads normalized by number of (0: unique mapped reads, 1: total reads) [0])\n");
+    fprintf(stderr, "         -U       unique reads normalized by number of (0: unique mapped reads in repeats, 1: unique mapped reads, 2: total reads) [0])\n");
     fprintf(stderr, "         -R       remove redundant reads [off]\n");
     fprintf(stderr, "         -T       treat 1 paired-end read as 2 single-end reads [off]\n");
     fprintf(stderr, "         -D       discard if only one end mapped in a paired end reads [off]\n");
     fprintf(stderr, "         -w       keep the wiggle file [off]\n");
+    fprintf(stderr, "         -B       output bed file of mapped reads [off]\n");
+    fprintf(stderr, "         -V       output bed file of unique mapped reads [off]\n");
     fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
     fprintf(stderr, "         -E       extend reads to represent fragment [150], specify 0 if want no extension\n");
     fprintf(stderr, "         -I       Insert length threshold [500]\n");
@@ -939,17 +963,19 @@ int main_stat (int argc, char *argv[]) {
     
     char *output, *outReport, *outWig, *outbigWig, *outWigUniq, *outbigWigUniq, *outStat, *outFam, *outCla;
     unsigned long long int *cnt;
-    int optSam = 0, optkeepWig = 0, c, optDup = 0, optaddChr = 0, optDis = 0, optTreat = 0;
+    int optSam = 0, optkeepWig = 0, c, optDup = 0, optaddChr = 0, optDis = 0, optTreat = 0, optBed = 0, optBedUniq = 0;
     unsigned int optQual = 10, optNorm = 0, optisize = 500, optNorm2 = 0, optExt = 150;
     float optCov = 0.0001;
     char *optoutput = NULL;
+    char *outBed = NULL;
+    char *outBedUniq = NULL;
     time_t start_time, end_time;
     struct hash *hashRmsk = newHash(0);
     struct hash *hashRep = newHash(0);
     struct hash *hashFam = newHash(0);
     struct hash *hashCla = newHash(0);
     start_time = time(NULL);
-    while ((c = getopt(argc, argv, "SQ:c:N:U:RTDwCo:E:I:h?")) >= 0) {
+    while ((c = getopt(argc, argv, "SQ:c:N:U:RTDwBVCo:E:I:h?")) >= 0) {
         switch (c) {
             case 'S': optSam = 1; break;
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
@@ -960,6 +986,8 @@ int main_stat (int argc, char *argv[]) {
             case 'T': optTreat = 1; break;
             case 'D': optDis = 1; break;
             case 'w': optkeepWig = 1; break;
+            case 'B': optBed = 1; break;
+            case 'V': optBedUniq = 1; break;
             case 'C': optaddChr = 1; break;
             case 'E': optExt = (unsigned int)strtol(optarg, 0, 0); break;
             case 'I': optisize = (unsigned int)strtol(optarg, 0, 0); break;
@@ -999,6 +1027,15 @@ int main_stat (int argc, char *argv[]) {
         errAbort("Preparing output wrong");
     if (asprintf(&outCla, "%s.iteres.class.stat", output) < 0)
         errAbort("Preparing output wrong");
+
+    if(optBed){
+        if(asprintf(&outBed, "%s.iteres.bed", output) < 0)
+            errAbort("Mem Error.\n");
+    }
+    if(optBedUniq){
+        if(asprintf(&outBedUniq, "%s.iteres.unique.bed", output) < 0)
+            errAbort("Mem Error.\n");
+    }
     
     int nindex = 0;
     if (optNorm == 0){
@@ -1015,8 +1052,10 @@ int main_stat (int argc, char *argv[]) {
     
     int nindex2 = 0;
     if (optNorm2 == 0){
-        nindex2 = 7;
+        nindex2 = 10;
     } else if (optNorm2 == 1){
+        nindex2 = 7;
+    } else if (optNorm2 == 2){
         nindex2 = 0;
     } else{
         errAbort("Wrong normalization method specified");
@@ -1036,7 +1075,7 @@ int main_stat (int argc, char *argv[]) {
     //    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr);
     //}
     
-    cnt = samFile2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat);
+    cnt = samFile2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat, outBed, outBedUniq);
 
     fprintf(stderr, "* Writing stats and Wig file\n");
     writeWigandStat(hashRep, hashFam, hashCla, outStat, outWig, outFam, outCla, outWigUniq, cnt[nindex], cnt[nindex2]);
