@@ -388,9 +388,9 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
             strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
             if (extension) {
                 if (strand == '+'){
-                    end = start + extension;
+                    end = min(start + extension, cend);
                 }else{
-                    start = end - extension;
+                    start = max(end - extension, 0);
                 }
             }
 
@@ -433,9 +433,9 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                     strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
                     if (extension) {
                         if (strand == '+'){
-                            end = start + extension;
+                            end = min(start + extension, cend);
                         }else{
-                            start = end - extension;
+                            start = max(end - extension, 0);
                         }
                     }
                 }
@@ -450,9 +450,9 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
             strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
             if (extension) {
                 if (strand == '+'){
-                    end = start + extension;
+                    end = min(start + extension, cend);
                 }else{
-                    start = end - extension;
+                    start = max(end - extension, 0);
                 }
             }
         }
