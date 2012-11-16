@@ -1254,11 +1254,14 @@ void rmsk2binKeeperHash(char *rmskfile, struct hash *chrHash, struct hash *repHa
 
 struct hash *MREfrag2Hash (char *fragfile, int minlen, int maxlen){
     struct hash *hash = newHash(0);
-    char *row[12];
+    char *row[20], *line;
     int start, end, length, rstart, rend;
     char key1[100], key2[100];
     struct lineFile *frag_stream = lineFileOpen(fragfile, TRUE);
-    while ( lineFileNextRow(frag_stream, row, ArraySize(row))){
+    while ( lineFileNextReal(frag_stream, &line)){
+        int numFields = chopByWhite(line, row, ArraySize(row));
+        if (numFields < 4)
+            errAbort("file %s doesn't appear to be in bed format. At least 3 fields required, got %d", fragfile, numFields);
         start = (int) strtol(row[1], NULL, 0);
         end = (int) strtol(row[2], NULL, 0);
         length  = end - start;
@@ -1299,20 +1302,31 @@ struct hash *MREfrag2Hash (char *fragfile, int minlen, int maxlen){
 }
 
 unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char *outBed, int call){
-    struct bed *bedList = NULL, *bed;
     FILE *f  = mustOpen(outBed, "w");
-    bedList = bedLoadAll(inBed);
+    char strand, *row[20], *line;
+    struct lineFile *inBedStream = lineFileOpen(inBed, TRUE);
     char key1[30]; //key2[30];
+    int start, end, rstart, rend;
     unsigned long long int CCGG = 0, CCGC = 0, GCGC = 0, ACGT = 0, CGCG = 0, unknown = 0;
     unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 6);
-    for (bed = bedList; bed != NULL; bed = bed->next){
-        if (bed->strand[0] == '+'){
-            if (sprintf(key1, "%s:%i:%c", bed->chrom, bed->chromStart - call, '+') < 0)
+    while( lineFileNextReal(inBedStream, &line)){
+        int numFields = chopByWhite(line, row, ArraySize(row));
+        if (numFields < 6)
+            errAbort("file %s doesn't appear to be in bed format. At least 6 fields required, got %d", inBed, numFields);
+        strand = row[5][0];
+        start = (int)strtol(row[1], NULL, 0);
+        end = (int)strtol(row[2], NULL, 0);
+        if (strand == '+'){
+            rstart = start - call;
+            rend = end;
+            if (sprintf(key1, "%s:%i:%c", row[0], rstart, '+') < 0)
                 errAbort("Mem ERROR");
             //if (sprintf(key2, "%s:%i:%c", bed->chrom, bed->chromStart - 3, '+') < 0)
             //    errAbort("Mem ERROR");
         } else {
-            if (sprintf(key1, "%s:%i:%c", bed->chrom, bed->chromEnd + call, '-') < 0)
+            rstart = start;
+            rend = end + call;
+            if (sprintf(key1, "%s:%i:%c", row[0], rend, '-') < 0)
                 errAbort("Mem ERROR");
             //if (sprintf(key2, "%s:%i:%c", bed->chrom, bed->chromEnd + 3, '-') < 0)
             //    errAbort("Mem ERROR");
@@ -1320,7 +1334,8 @@ unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char
         struct hashEl *hel = hashLookup(hash, key1);
         //struct hashEl *hel2 = hashLookup(hash, key2);
         if (hel != NULL) {
-            bedOutputN(bed, 6, f, '\t', '\n');
+            //bedOutputN(bed, 6, f, '\t', '\n');
+            fprintf(f, "%s\t%i\t%i\t%s\t%s\t%c\n", row[0], rstart, rend, row[3], row[4], strand);
             struct mreFrag *mre = (struct mreFrag *) hel->val;
             mre->reads_count++;
             if (sameWord(mre->site, "CCGG")) {
@@ -1354,7 +1369,8 @@ unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char
         }
     }
     carefulClose(&f);
-    bedFreeList(&bedList);
+    lineFileClose(&inBedStream);
+    //bedFreeList(&bedList);
     cnt[0] = CCGG;
     cnt[1] = CCGC;
     cnt[2] = GCGC;
