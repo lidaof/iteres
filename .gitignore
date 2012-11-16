@@ -1,3 +1,9 @@
 *.[oa]
-iteres ChipSeqHandler evaluateSAM RAP RevMaskFaExt TEstat NearByGenes
-test*
+iteres
+*test*
+utils/ChipSeqHandler/ChipSeqHandler
+utils/RAP/RAP
+utils/RevMaskFaExt/RevMaskFaExt
+utils/TEstat/TEstat
+utils/evaluateSAM/evaluateSAM
+utils/get_nearby_gene_from_ucsc/NearByGenes
