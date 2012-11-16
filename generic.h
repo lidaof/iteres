@@ -23,18 +23,42 @@ struct rep {
     unsigned long long int read_count, read_count_unique, genome_count, total_length;
     unsigned int length;
     unsigned int *bp_total, *bp_total_unique;
+    unsigned int cpgCount;
+    double *cpgScore;
+    double cpgTotalScore;
 };
 
 //struct hold contents for repeat family
 struct repfam {
     char *fname, *cname;
     unsigned long long int read_count, read_count_unique, genome_count, total_length;
+    unsigned int cpgCount;
+    double cpgTotalScore;
 };
 
 //struct hold contents for repeat class
 struct repcla {
     char *cname;
     unsigned long long int read_count, read_count_unique, genome_count, total_length;
+    unsigned int cpgCount;
+    double cpgTotalScore;
+};
+
+struct mreFrag {
+    char pair[40], chr[20];
+    unsigned long long int reads_count;
+    int head, start, end;
+    char site[5]; //dont forget \0
+};
+
+struct range {
+    int s, e, histo;
+};
+
+struct cpgScore {
+    int start;
+    double score;
+    char chr[20];
 };
 
 int stat_usage();
@@ -45,6 +69,10 @@ int nearby_usage();
 int main_nearby(int argc, char *argv[]);
 int density_usage();
 int main_density(int argc, char *argv[]);
+int cpg_usage();
+int main_cpg(int argc, char *argv[]);
+int cpgstat_usage();
+int main_cpgstat(int argc, char *argv[]);
 
 
 char *get_filename_without_ext(char *filename);
@@ -64,3 +92,11 @@ void writeFilterOut(struct hash *hash, char *out, int readlist, int threshold, c
 void sortBedfile(char *bedfile);
 void writeReportDensity(char *outfile, unsigned long long int *cnt, unsigned int mapQ);
 unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHash, int isSam, unsigned int mapQ, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, int treat);
+struct hash *MREfrag2Hash (char *fragfile, int minlen, int maxlen);
+unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char *outBed, int call);
+double calCpGscore (struct mreFrag *mre, unsigned long long int *cnt);
+unsigned long long int  CpGscorebedGraph(struct hash *hash, unsigned long long int *cnt, char *outfile);
+void fragmentStats(struct hash *hash, unsigned long long int *cnt2, unsigned int mapQ, unsigned long long int *cnt, unsigned long long int cnt1, char *outfile, int minlen, int maxlen, int win);
+char *print_bar(int x);
+void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla);
+void MREwriteWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash2, char *of1, char *of2, char *of3, char *of4);

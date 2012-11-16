@@ -1,5 +1,12 @@
-#include "generic.h"
+#include <argp.h>
+#include "common.h"
+#include "linefile.h"
+#include "hash.h"
+#include "binRange.h"
+#include "basicBed.h"
+#include "bigWig.h"
 #include "sqlNum.h"
+#include "obscure.h"
 #include "localmem.h"
 #include "dystring.h"
 #include "cirTree.h"
@@ -8,12 +15,19 @@
 #include "bPlusTree.h"
 #include "bbiFile.h"
 #include "bwgInternal.h"
+#include "sam.h"
+
+int8_t seq_comp_table[16] = { 0, 8, 4, 12, 2, 10, 9, 14, 1, 6, 5, 13, 3, 11, 7, 15 };
 
 typedef unsigned int unitSize;
 
 #define MAXCOUNT (unitSize)~0
 #define MAXMESSAGE "Overflow of overlap counts. Max is %lu.  Recompile with bigger unitSize or use -max option"
 #define INCWOVERFLOW(countArray,x) if(countArray[x] == MAXCOUNT) {if(!doMax) errAbort(MAXMESSAGE,(unsigned long)MAXCOUNT);} else countArray[x]++
+
+const char *argp_program_version = "ChipSeqHandler 0.1";
+
+const char *argp_program_bug_address = "<http://wang.wustl.edu>";
 
 boolean doMax = FALSE;   /* if overlap count will overflow, just keep max */
 boolean doZero = FALSE;  /* add blocks with 0 counts */
@@ -521,6 +535,18 @@ carefulClose(&f);
 }
 
 
+/* definitions of structures*/
+
+//struct hold contens from sam line
+struct sam {
+    unsigned int start, end, length;
+    char *chr;
+    char *name;
+    char *seq;
+    uint32_t qual:8;
+    char strand;
+};
+
 /* definitions of functions */
 
 static void outputCounts(unitSize *counts, char *chrom, unsigned size, FILE *f){
@@ -675,65 +701,586 @@ freez(&prevChrom);
 freeHash(&seenHash);
 }
 
-int density_usage(){
-    fprintf(stderr, "\n");
-    fprintf(stderr, "\nWorks as ChipSeqHandler program.\nPlease noticed that if reads mapped to the chromosomes which didn't existed in size file, this type of reads will be discarded.\n");
-    fprintf(stderr, "Usage:   iteres density [options] <chromosome size file> <bam/sam alignment file>\n\n");
-    fprintf(stderr, "Options: -S       input is SAM [off]\n");
-    fprintf(stderr, "         -Q       unique reads mapping Quality threshold [10]\n");
-    fprintf(stderr, "         -r       do NOT remove redundant reads [off]\n");
-    fprintf(stderr, "         -T       treat 1 paired-end read as 2 single-end reads [off]\n");
-    fprintf(stderr, "         -D       discard if only one end mapped in a paired end reads [off]\n");
-    fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
-    fprintf(stderr, "         -E       extend reads to represent fragment [150], specify 0 if want no extension\n");
-    fprintf(stderr, "         -I       Insert length threshold [500]\n");
-    fprintf(stderr, "         -o       output prefix [basename of input without extension]\n");
-    fprintf(stderr, "         -h       help message\n");
-    fprintf(stderr, "         -?       help message\n");
-    fprintf(stderr, "\n");
-    return 1;
+static int itemRgbColumn(char *column9){
+int itemRgb = 0;
+/*  Allow comma separated list of rgb values here   */
+char *comma = strchr(column9, ',');
+if (comma)
+    {
+    if (-1 == (itemRgb = bedParseRgb(column9)))
+	errAbort("ERROR: expecting r,g,b specification, "
+		    "found: '%s'", column9);
+    }
+else
+    itemRgb = sqlUnsigned(column9);
+return itemRgb;
 }
 
-/* main function */
-int main_density (int argc, char *argv[]) {
-    
-    char *output, *outReportfile, *outExtfile, *outbedGraphfile, *outbigWigfile;
-    unsigned long long int *cnt;
-    int optSam = 0, c, optDup = 1, optaddChr = 0, optDis = 0, optTreat = 0;
-    unsigned int optQual = 10, optExt = 150, optisize = 500;
-    char *optoutput = NULL;
-    time_t start_time, end_time;
-    start_time = time(NULL);
-    
-    while ((c = getopt(argc, argv, "SQ:rTDCo:E:I:h?")) >= 0) {
-        switch (c) {
-            case 'S': optSam = 1; break;
-            case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
-            case 'r': optDup = 0; break;
-            case 'T': optTreat = 1; break;
-            case 'D': optDis = 1; break;
-            case 'C': optaddChr = 1; break;
-            case 'E': optExt = (unsigned int)strtol(optarg, 0, 0); break;
-            case 'I': optisize = (unsigned int)strtol(optarg, 0, 0); break;
-            case 'o': optoutput = strdup(optarg); break;
-            case 'h':
-            case '?': return density_usage(); break;
-            default: return 1;
+char *get_filename_without_ext(char *filename) {
+    char *s;
+    s = malloc(strlen(filename) + 1);
+    strcpy(s, filename);
+    char *dot = strrchr(s, '.');
+    if(!dot || dot == s) return s;
+    *dot = '\0';
+    return s;
+}
+
+char *get_filename_ext(char *filename) {
+    char *dot = strrchr(filename, '.');
+    if(!dot || dot == filename) return "";
+    return dot + 1;
+}
+
+double cal_rpkm (unsigned int reads_count, unsigned int total_length, unsigned int mapped_reads_num) {
+    return reads_count / (mapped_reads_num * 1e-9 * total_length);
+}
+
+struct arguments {
+    char *args[1];
+    int Sam;
+    unsigned int extend;
+    char *output, *sizef, *db;
+};
+
+static struct argp_option options[] = 
+{
+    {"db", 'd', "dataBase", 0, "database assembly, such as hg19, hg18, mm9 and rn4 (default: hg19)"},
+    {"sizef", 's', "sizeFile", 0, "chromosome size file"},
+    {"extend", 'e', "extendLength", 0, "Extend length (default: 150"},
+    {"Sam", 'S', 0, 0, "Input is a SAM file (default: off)"},
+    {"output", 'o', "outputBase", 0, "Base name for output files (default: the basename of input file)"},
+    {0}
+};
+static char args_doc[] = "<bam/sam alignment file>";
+static char doc[] = "\nChipSeqHandler program.\n\nPlease note a chromosome size file was required, size file path for assembly hg19, hg18, mm9 and rn4 was included in the program.\nYou can always use the -s option to sepcify your own size file whether your assembly was included or not.\nIf your assembly was not in the list above, using -s specify a size file, -d could be anything then.\nAlso noticed that: if reads mapped to the chromosomes which didn't existed in size file, this type of reads will be discarded.\n";
+
+static error_t parse_opt (int key, char *arg, struct argp_state *state)
+{
+    struct arguments *arguments = state->input;
+
+    switch (key)
+    {
+        case 'd':
+            arguments->db = arg;
+            break;
+        case 's':
+            arguments->sizef = arg;
+            break;
+        case 'S':
+            arguments->Sam = 1;
+            break;
+        case 'e':
+            arguments->extend = (unsigned int)strtol(arg, NULL, 0);
+            break;
+        case 'o':
+            arguments->output = arg;
+            break;
+        case ARGP_KEY_ARG:
+            if( state->arg_num >= 1)
+            {
+                argp_usage(state);
+            }
+            arguments->args[state->arg_num] = arg;
+            break;
+        case ARGP_KEY_END:
+            if (state->arg_num < 1)
+            {
+                argp_usage(state);
+            }
+            break;
+        default:
+            return ARGP_ERR_UNKNOWN;
+    }
+    return 0;
+}
+
+static struct argp argp = {options, parse_opt, args_doc, doc};
+
+struct sam *fetch_sa (const bam1_t *b, void *data){
+    struct sam *s = malloc(sizeof(struct sam));
+    samfile_t *fp = (samfile_t *) data;
+    uint32_t *cigar = bam1_cigar(b);
+    const bam1_core_t *c = &b->core;
+    int i, l, j;
+    uint8_t *ss = bam1_seq(b);
+    s->name = cloneString(bam1_qname(b));
+    s->chr = cloneString("*");
+    s->start = 0;
+    s->end = 0;
+    s->length = 0;
+    s->qual = 0;
+    s->strand = '*';
+    s->seq = needLargeMem(c->l_qseq + 1);
+    for (j = 0; j < c->l_qseq; ++j) s->seq[j] = bam_nt16_rev_table[bam1_seqi(ss, j)];
+    s->seq[c->l_qseq] = '\0';
+    if (b->core.tid < 0) return s;
+    for (i = l = 0; i < c->n_cigar; ++i) {
+        int op = cigar[i]&0xf;
+        if (op == BAM_CMATCH || op == BAM_CDEL || op == BAM_CREF_SKIP)
+            l += cigar[i]>>4;
+    }
+    s->chr = cloneString(fp->header->target_name[c->tid]);
+    s->start = c->pos;
+    s->end = c->pos + l;
+    s->length = l;
+    s->qual = c->qual;
+    s->strand = (c->flag&BAM_FREVERSE) ? '-' : '+';
+    return s;
+}
+
+struct bed *sam2bed(struct sam *sam) {
+    struct bed *ret;
+    char *chr;
+    AllocVar(ret);
+    if (startsWith("GL", sam->chr)) {
+        return 0;
+    } else if (sameWord(sam->chr, "MT")) {
+        chr = cloneString("chrM");
+    } else if (!startsWith("chr", sam->chr)) {
+        chr = catTwoStrings("chr", sam->chr);
+    } else {
+        chr = cloneString(sam->chr);
+    }
+    ret->chrom = cloneString(chr);
+    ret->chromStart = sam->start;
+    ret->chromEnd = sam->end;
+    ret->name = cloneString(sam->seq);
+    ret->score = 0;
+    ret->strand[0] = sam->strand;
+    ret->thickStart = 0;
+    ret->thickEnd = 0;
+    ret->itemRgb = itemRgbColumn((sam->strand == '-') ? "0,0,255" : "255,0,0");
+    freeMem(chr);
+    return ret;
+}
+
+int writesam2bed(struct sam *sam, struct hash *hash, FILE *f){
+    char *chr;
+    unsigned int end;
+    if (startsWith("GL", sam->chr)) {
+        return 0;
+    } else if (sameWord(sam->chr, "MT")) {
+        chr = cloneString("chrM");
+    } else if (!startsWith("chr", sam->chr)) {
+        chr = catTwoStrings("chr", sam->chr);
+    } else {
+        chr = cloneString(sam->chr);
+    }
+    end = (unsigned int) (hashIntValDefault(hash, chr, 2) - 1);
+    if (end == 1)
+        return 0;
+    end = min(end, sam->end);
+    fprintf(f, "%s\t%u\t%u\t%s\t%d\t%c\t%d\t%d\t%s\n", chr, sam->start, end, sam->seq, 0, sam->strand, 0, 0, (sam->strand == '-') ? "0,0,255" : "255,0,0");
+    freeMem(chr);
+    return 0;
+}
+
+unsigned long long int removeBedDup(char *infile, char *outfile) {
+    char *preChrom = "empty", *line;
+    int preStart = 0, lineSize;
+    unsigned long long int i = 0;
+    struct lineFile *lf = NULL;
+    struct bedLine *bl;
+    FILE *f = mustOpen(outfile, "w");
+    lf = lineFileOpen(infile, TRUE);
+    while (lineFileNext(lf, &line, &lineSize)) {
+        if (line[0] == '#')
+            continue;
+        int num = chopByWhite(line, NULL, 0);
+        if (num != 9)
+            continue;
+        bl = bedLineNew(line);
+        if (sameWord(bl->chrom, preChrom) && (bl->chromStart == preStart))
+            continue;
+        fprintf(f, "%s\t%s\n", bl->chrom, bl->line);
+        preChrom = cloneString(bl->chrom);
+        preStart = bl->chromStart;
+        i++;
+    }
+    carefulClose(&f);
+    return i;
+}
+
+int extendBed(struct hash *hash, int extend, char *infile, char *outfile){
+    struct bed *bedList = NULL, *bed;
+    FILE *f  = mustOpen(outfile, "w");
+    bedList = bedLoadAll(infile);
+    for (bed = bedList; bed != NULL; bed = bed->next){
+        int len = bed->chromEnd - bed->chromStart;
+        if (len >= extend){
+            warn("* Warning: read length %d longer than extend length %d, no need for extending", len, extend);
+            carefulClose(&f);
+            bedFreeList(&bedList);
+            return 1;
+        }
+        int tlen = hashIntVal(hash, bed->chrom);
+        if (bed->strand[0] == '+'){
+            bed->chromEnd += (extend - len);
+            if (bed->chromEnd >= (tlen - 1))
+                bed->chromEnd = tlen - 1;
+        } else {
+            bed->chromStart -= (extend - len);
+            if (bed->chromStart <= 0)
+                bed->chromStart = 0;
+        }
+        bedOutputN(bed, 9, f, '\t', '\n');
+    }
+    carefulClose(&f);
+    bedFreeList(&bedList);
+    return 0;
+}
+
+void freeSam(struct sam *s){
+    freeMem(s->chr);
+    freeMem(s->name);
+    freeMem(s->seq);
+    free(s);
+}
+
+void sortBedfile(char *bedfile) {
+    struct lineFile *lf = NULL;
+    FILE *f = NULL;
+    struct bedLine *blList = NULL, *bl;
+    char *line;
+    int lineSize;
+
+    lf = lineFileOpen(bedfile, TRUE);
+    while (lineFileNext(lf, &line, &lineSize)){
+        if (line[0] == '#')
+            continue;
+        bl = bedLineNew(line);
+        slAddHead(&blList, bl);
+    }
+    lineFileClose(&lf);
+
+    slSort(&blList, bedLineCmp);
+
+    f = mustOpen(bedfile, "w");
+    for (bl = blList; bl != NULL; bl = bl->next){
+        fprintf(f, "%s\t%s\n", bl->chrom, bl->line);
+        if (ferror(f)){
+    	    perror("Writing error\n");
+	    errAbort("%s is truncated, sorry.", bedfile);
+	}
+    }
+    carefulClose(&f);
+    bedLineFreeList(&blList);
+}
+
+void writeReport(char *outfile, unsigned long long int *cnt){
+    FILE *f = mustOpen(outfile, "w");
+    fprintf(f, " Total reads: %llu\n", cnt[0]);
+    fprintf(f, "Mapped reads: %llu\n", cnt[1]);
+    fprintf(f, "  Used reads: %llu\n", cnt[2]);
+    fprintf(f, "Unique reads: %llu\n", cnt[3]);
+    carefulClose(&f);
+}
+
+unsigned long long int *samFile2nodupExtbedFile(char *samfile, char *bedfile, struct hash *hash, int isSam, unsigned int extend) {
+    samfile_t *samfp;
+    char *chr = NULL, *prn, *key;
+    FILE *outBed;
+    unsigned int start, end, cend;
+    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 4);
+    unsigned long long int mapped_reads_num = 0, reads_num = 0, reads_used = 0, unique_reads = 0;
+    struct hash *nochr = newHash(0), *dup = newHash(0);
+    struct hashEl *hel, *he;
+    boolean doExtend = TRUE;
+    int outputWarn = 0;
+    //uint32_t *cigar;
+    bam1_core_t *c;
+    uint8_t *s;
+    //int i, l, j;
+    int j;
+    if (isSam) {
+        if ( (samfp = samopen(samfile, "r", 0)) == 0) {
+            fprintf(stderr, "Fail to open SAM file %s\n", samfile);
+            errAbort("Error\n");
+        }
+    } else {
+        if ( (samfp = samopen(samfile, "rb", 0)) == 0) {
+            fprintf(stderr, "Fail to open BAM file %s\n", samfile);
+            errAbort("Error\n");
         }
     }
-    if (optind + 2 > argc)
-        return density_usage();
+    outBed = mustOpen(bedfile, "w");
+    prn = cloneString("empty");
+    bam1_t *b = bam_init1();
+    while ( samread(samfp, b) >= 0) {
+        //cigar = bam1_cigar(b);
+        c = &b->core;
+        s = bam1_seq(b);
+        if ( sameString (bam1_qname(b), prn)) 
+            continue;
+        reads_num++;
+        if ((reads_num % 10000) == 0)
+            fprintf(stderr, "\r* Processed reads: %llu", reads_num);
+        prn = cloneString(bam1_qname(b));
+        if (b->core.tid < 0)
+            continue;
+        mapped_reads_num++;
+        //for (i = l = 0; i < c->n_cigar; ++i) {
+        //    int op = cigar[i]&0xf;
+        //    if (op == BAM_CMATCH || op == BAM_CDEL || op == BAM_CREF_SKIP)
+        //        l += cigar[i]>>4;
+        //}
+        //change chr name to chr1, chr2 ...
+        if (startsWith("GL", samfp->header->target_name[c->tid])) {
+            continue;
+        } else if (sameWord(samfp->header->target_name[c->tid], "MT")) {
+            chr = cloneString("chrM");
+        } else if (!startsWith("chr", samfp->header->target_name[c->tid])) {
+            chr = catTwoStrings("chr", samfp->header->target_name[c->tid]);
+        } else {
+            chr = cloneString(samfp->header->target_name[c->tid]);
+        }
+        he = hashLookup(nochr, chr);
+        if (he != NULL)
+            continue;
+        cend = (unsigned int) (hashIntValDefault(hash, chr, 2) - 1);
+        if (cend == 1){
+            hashAddInt(nochr, chr, 1);
+            warn("* Warning: reads mapped to chromosome %s will be discarded as %s not existed in the chromosome size file", chr, chr);
+            continue;
+        }
+        reads_used++;
+        start = (unsigned int) c->pos;
+        //remove dup first
+        if (asprintf(&key, "%s:%u", chr, start) < 0)
+            errAbort("Mem ERROR");
+        hel = hashLookup(dup, key);
+        if (hel == NULL) {
+            hashAddInt(dup, key, 1);
+        } else {
+            continue;
+        }
+        unique_reads++;
+        //extend
+        end = min(cend, (unsigned int)c->pos + c->l_qseq);
+        if ( (unsigned int)c->l_qseq >= extend){
+            doExtend = FALSE;
+            outputWarn++;
+            if (outputWarn == 1)
+                warn("* Warning: read length %d longer than extend length %u, do not extend", c->l_qseq, extend);
+        }
+        if (doExtend){
+            if (c->flag&BAM_FREVERSE){
+                start = end - extend;
+                if (start < 0)
+                    start = 0;
+            } else {
+                end = start + extend;
+                end = min(cend, end);
+            }
+        }
+        fprintf(outBed, "%s\t%u\t%u\t", chr, start, end);
+        //fprintf(outBed, "%s\t", bam1_qname(b));
+        for (j = 0; j < c->l_qseq; ++j) fprintf(outBed, "%c", bam_nt16_rev_table[bam1_seqi(s, j)]);
+        //fprintf(outBed, "\t%d\t%c\t%d\t%d\t%s\n", 0, (c->flag&BAM_FREVERSE) ? '-' : '+', 0, 0, (c->flag&BAM_FREVERSE) ? "0,0,255" : "255,0,0");
+        fprintf(outBed, "\t%d\t%c\n", 0, (c->flag&BAM_FREVERSE) ? '-' : '+');
+    }
+    fprintf(stderr, "\r* Processed reads: %llu", reads_num);
+    bam_destroy1(b);
+    samclose(samfp);
+    freeMem(prn);
+    freeMem(chr);
+    free(key);
+    freeHash(&nochr);
+    freeHash(&dup);
+    carefulClose(&outBed);
+    cnt[0] = reads_num;
+    cnt[1] = mapped_reads_num;
+    cnt[2] = reads_used;
+    cnt[3] = unique_reads;
+    return cnt;
+}
 
-    char *chr_size_file = argv[optind];
-    char *sam_file = argv[optind+1];
-    
-    if(optoutput) {
-        output = optoutput;
+unsigned long long int *samFile2nodupExtbedFile1(char *samfile, char *bedfile, struct hash *hash, int isSam, unsigned int extend) {
+    samfile_t *samfp;
+    char chr[100], prn[500], key[100];
+    FILE *outBed;
+    unsigned int start, end, cend;
+    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 4);
+    unsigned long long int mapped_reads_num = 0, reads_num = 0, reads_used = 0, unique_reads = 0;
+    struct hash *nochr = newHash(0), *dup = newHash(0);
+    boolean doExtend = TRUE;
+    int outputWarn = 0;
+    if (isSam) {
+        if ( (samfp = samopen(samfile, "r", 0)) == 0) {
+            fprintf(stderr, "Fail to open SAM file %s\n", samfile);
+            errAbort("Error\n");
+        }
     } else {
+        if ( (samfp = samopen(samfile, "rb", 0)) == 0) {
+            fprintf(stderr, "Fail to open BAM file %s\n", samfile);
+            errAbort("Error\n");
+        }
+    }
+    outBed = mustOpen(bedfile, "w");
+    strcpy(prn, "empty");
+    bam1_t *b;
+    bam_header_t *h;
+    int8_t *buf;
+    int max_buf;
+    h = samfp->header;
+    b = bam_init1();
+    buf = 0;
+    max_buf = 0;
+    while ( samread(samfp, b) >= 0) {
+        if ( sameString (bam1_qname(b), prn)) 
+            continue;
+        reads_num++;
+        if ((reads_num % 10000) == 0)
+            fprintf(stderr, "\r* Processed reads: %llu", reads_num);
+        strcpy(prn, bam1_qname(b));
+        if (b->core.tid < 0)
+            continue;
+        mapped_reads_num++;
+        //change chr name to chr1, chr2 ...
+        if (startsWith("GL", h->target_name[b->core.tid])) {
+            continue;
+        } else if (sameWord(h->target_name[b->core.tid], "MT")) {
+            strcpy(chr,"chrM");
+        } else if (!startsWith("chr", h->target_name[b->core.tid])) {
+            strcpy(chr, "chr");
+            strcat(chr, h->target_name[b->core.tid]);
+        } else {
+            strcpy(chr, h->target_name[b->core.tid]);
+        }
+        struct hashEl *he = hashLookup(nochr, chr);
+        if (he != NULL)
+            continue;
+        cend = (unsigned int) (hashIntValDefault(hash, chr, 2) - 1);
+        if (cend == 1){
+            hashAddInt(nochr, chr, 1);
+            warn("* Warning: reads mapped to chromosome %s will be discarded as %s not existed in the chromosome size file", chr, chr);
+            continue;
+        }
+        reads_used++;
+        int i, qlen = b->core.l_qseq;
+        uint8_t *seq;
+        start = (unsigned int) b->core.pos;
+        //remove dup first
+        //strcpy(key, chr);
+        //strcat(key, ":");
+        //strcat(key, (char*)start);
+        if (sprintf(key, "%s:%u", chr, start) < 0)
+            errAbort("Mem ERROR");
+        struct hashEl *hel = hashLookup(dup, key);
+        if (hel == NULL) {
+            hashAddInt(dup, key, 1);
+        } else {
+            continue;
+        }
+        unique_reads++;
+        //extend
+        end = min(cend, (unsigned int)b->core.pos + qlen);
+        if ( (unsigned int)qlen >= extend){
+            doExtend = FALSE;
+            outputWarn++;
+            if (outputWarn == 1)
+                warn("* Warning: read length %d longer than extend length %u, do not extend", qlen, extend);
+        }
+        if (doExtend){
+            if (b->core.flag&BAM_FREVERSE){
+                start = end - extend;
+                if (start < 0)
+                    start = 0;
+            } else {
+                end = start + extend;
+                end = min(cend, end);
+            }
+        }
+        fprintf(outBed, "%s\t%u\t%u\t", chr, start, end);
+
+        if (max_buf < qlen + 1 ) {
+            max_buf = qlen + 1;
+            kroundup32(max_buf);
+            buf = realloc(buf, max_buf);
+        }
+        buf[qlen] = 0;
+        seq = bam1_seq(b);
+        for (i = 0; i < qlen; ++i)
+            buf[i] = bam1_seqi(seq, i);
+        if (b->core.flag & 16) {
+            for (i = 0; i < qlen>>1; ++i){
+                int8_t t = seq_comp_table[buf[qlen - 1 - i]];
+                buf[qlen - 1 - i] = seq_comp_table[buf[i]];
+                buf[i] = t;
+            }
+            if (qlen&1) buf[i] = seq_comp_table[buf[i]];
+        }
+        for (i = 0; i < qlen; ++i)
+            buf[i] = bam_nt16_rev_table[buf[i]];
+        fprintf(outBed, "%s", (char*)buf);
+        fprintf(outBed, "\t%d\t%c\n", 0, (b->core.flag&BAM_FREVERSE) ? '-' : '+');
+    }
+    fprintf(stderr, "\r* Processed reads: %llu", reads_num);
+    samclose(samfp);
+    free(buf);
+    bam_destroy1(b);
+    //bam_header_destroy(h);
+    //freeMem(prn);
+    //freeMem(chr);
+    freeHash(&nochr);
+    freeHash(&dup);
+    carefulClose(&outBed);
+    cnt[0] = reads_num;
+    cnt[1] = mapped_reads_num;
+    cnt[2] = reads_used;
+    cnt[3] = unique_reads;
+    return cnt;
+}
+
+/* main funtion */
+int main (int argc, char *argv[]) {
+    
+    char *output, *chr_size_file = NULL, *outReportfile, *outExtfile, *outbedGraphfile, *outbigWigfile;
+    unsigned long long int *cnt;
+    struct arguments arguments;
+    time_t start_time, end_time;
+    start_time = time(NULL);
+
+    /* set default parameters*/
+    arguments.output = NULL;
+    arguments.db = "hg19";
+    arguments.extend = 150;
+    arguments.sizef = NULL;
+    arguments.Sam = 0;
+    /* parameter magic*/
+    argp_parse(&argp, argc, argv, 0, 0, &arguments);
+    
+    if (arguments.sizef == NULL){
+        if (sameWord(arguments.db, "hg19")){
+            chr_size_file = "/home/comp/twlab/twang/twlab-shared/genomes/hg19/hg19_chrom_sizes_tab";
+        } else if (sameWord(arguments.db, "hg18")){
+            chr_size_file = "/home/comp/twlab/twang/twlab-shared/genomes/hg18/hg18_chrom_sizes";
+        } else if (sameWord(arguments.db, "mm9")){
+            chr_size_file = "/home/comp/twlab/twang/twlab-shared/genomes/mm9/mm9_chrom_sizes";
+        } else if (sameWord(arguments.db, "rn4")){
+            chr_size_file = "/home/comp/twlab/mxie/Rat/seq/Rat_chrom_sizes";
+        }
+    } else{
+        chr_size_file = cloneString(arguments.sizef);
+    }
+
+    if (chr_size_file == NULL)
+        errAbort("A chromosome size file was required, specify it by -s option.\n");
+
+    char *sam_file = arguments.args[0];
+    if(arguments.output) {
+        output = arguments.output;
+    } else {
+        //output = get_filename_without_ext(basename(sam_file));
+        //if (asprintf(&output, get_filename_without_ext(basename(sam_file))) < 0)
+        //    errAbort("Preparing output wrong");
         output = cloneString(get_filename_without_ext(basename(sam_file)));
     }
-    
-
+    //if(asprintf(&outBedfile, "%s.original.bed", output) < 0)
+    //    errAbort("Mem Error.\n");
+    //if(asprintf(&outFilterfile, "%s.filter.bed", output) < 0)
+    //    errAbort("Mem Error.\n");
     if(asprintf(&outExtfile, "%s.extended.bed", output) < 0)
         errAbort("Mem Error.\n");
     if(asprintf(&outbedGraphfile, "%s.extended.bedGraph", output) < 0)
@@ -747,7 +1294,7 @@ int main_density (int argc, char *argv[]) {
     
     //sam file to bed file
     fprintf(stderr, "* Start to parse the SAM/BAM file ...\n");
-    cnt = sam2bed(sam_file, outExtfile, hash, optSam, optQual, optDup, optaddChr, optDis, optisize, optExt, optTreat);
+    cnt = samFile2nodupExtbedFile1(sam_file, outExtfile, hash, arguments.Sam, arguments.extend);
     //sort
     //fprintf(stderr, "\n* Sorting\n");
     //bedSortFile(outBedfile, outBedfile);
@@ -769,7 +1316,7 @@ int main_density (int argc, char *argv[]) {
     //}
 
     //sort extend bed
-    fprintf(stderr, "* Sorting extended bed\n");
+    fprintf(stderr, "\n* Sorting extended bed\n");
     sortBedfile(outExtfile);
     
     //bedItemOverlap step
@@ -783,7 +1330,7 @@ int main_density (int argc, char *argv[]) {
 
     //write report file
     fprintf(stderr, "* Preparing report file\n");
-    writeReportDensity(outReportfile, cnt, optQual);
+    writeReport(outReportfile, cnt);
     
     //cleaning
     hashFree(&hash);
