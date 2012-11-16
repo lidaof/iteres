@@ -6,6 +6,9 @@ Version 0.1.1
 
 #iteres
 
+Version 0.2.8
+  * directory structure changes
+
 Version 0.2.6
   * Paired-end bam/sam supported
 
