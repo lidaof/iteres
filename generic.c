@@ -109,7 +109,7 @@ void MREwriteWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash
     unsigned int m;
     struct hashEl *helr;
     struct hashCookie cookier = hashFirst(hash);
-    fprintf(f1, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "#subfamily", "family", "class", "consensus_length", "covered CpG sites", "CpG total score", "total_length", "genome_count");
+    fprintf(f1, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "#subfamily", "family", "class", "consensus_length", "covered_CpG_sites", "CpG_total_score", "total_length", "genome_count");
     while ( (helr = hashNext(&cookier)) != NULL ) {
         struct rep *or = (struct rep *) (helr->val);
         fprintf(f1, "%s\t%s\t%s\t%u\t%u\t%.4f\t%llu\t%llu\n", or->name, or->fname, or->cname, or->length, or->cpgCount, or->cpgTotalScore, or->total_length, or->genome_count);
@@ -125,7 +125,7 @@ void MREwriteWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash
     FILE *f3 = mustOpen(of3, "w");
     struct hashEl *hel3;
     struct hashCookie cookier3 = hashFirst(hash1);
-    fprintf(f3, "%s\t%s\t%s\t%s\t%s\t%s\n", "#family", "class", "covered CpG sites", "CpG total score", "total_length", "genome_count");
+    fprintf(f3, "%s\t%s\t%s\t%s\t%s\t%s\n", "#family", "class", "covered_CpG_sites", "CpG_total_score", "total_length", "genome_count");
     while ( (hel3 = hashNext(&cookier3)) != NULL) {
         struct repfam *or = (struct repfam *) hel3->val;
         fprintf(f3, "%s\t%s\t%u\t%.4f\t%llu\t%llu\n", or->fname, or->cname, or->cpgCount, or->cpgTotalScore, or->total_length, or->genome_count);
@@ -134,7 +134,7 @@ void MREwriteWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash
     FILE *f4 = mustOpen(of4, "w");
     struct hashEl *hel4;
     struct hashCookie cookier4 = hashFirst(hash2);
-    fprintf(f4, "%s\t%s\t%s\t%s\t%s\n", "#class", "covered CpG sites", "CpG total score", "total_length", "genome_count");
+    fprintf(f4, "%s\t%s\t%s\t%s\t%s\n", "#class", "covered_CpG_sites", "CpG_total_score", "total_length", "genome_count");
     while ( (hel4 = hashNext(&cookier4)) != NULL) {
         struct repcla *or = (struct repcla *) hel4->val;
         fprintf(f4, "%s\t%u\t%.4f\t%llu\t%llu\n", or->cname, or->cpgCount, or->cpgTotalScore, or->total_length, or->genome_count);
@@ -618,7 +618,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
     return cnt;
 }
 
-void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla) {
+void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int filter) {
     struct lineFile *infileStream = lineFileOpen(cpgBedGraphFile, TRUE);
     char *row[20], *line;
     unsigned int start, end, rstart, rend, cpgInRepeat = 0, cpglines = 0;
@@ -644,41 +644,46 @@ void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, stru
                     ss = (struct rmsk *) hit->val;
                     break;
                 }
-                struct hashEl *hel3 = hashLookup(hashRep, ss->name);
-                if (hel3 != NULL){
-                    struct rep *rs = (struct rep *) hel3->val;
-                    rs->cpgCount++;
-                    rs->cpgTotalScore += score;
-                    if (rs->length != 0){
-                        rstart = start - ss->start;
-                        rstart = (rstart < 0) ? 0 : rstart;
-                        rend = rstart + 2; //CpG site
-                        rend = (rend < ss->end) ? rend : ss->end;
-                        for (i = rstart; i < rend; i++) {
-                            j = i + ss->consensus_start;
-                            if (j >= ss->consensus_end) {
-                                break;
+                if (filter){
+                    ss->cpgCount++;
+                    ss->cpgTotalScore += score;
+                }else{
+                    struct hashEl *hel3 = hashLookup(hashRep, ss->name);
+                    if (hel3 != NULL){
+                        struct rep *rs = (struct rep *) hel3->val;
+                        rs->cpgCount++;
+                        rs->cpgTotalScore += score;
+                        if (rs->length != 0){
+                            rstart = start - ss->start;
+                            rstart = (rstart < 0) ? 0 : rstart;
+                            rend = rstart + 2; //CpG site
+                            rend = (rend < ss->end) ? rend : ss->end;
+                            for (i = rstart; i < rend; i++) {
+                                j = i + ss->consensus_start;
+                                if (j >= ss->consensus_end) {
+                                    break;
+                                }
+                                if (j >= rs->length) {
+                                    break;
+                                }
+                                (rs->cpgScore)[j] += score;
                             }
-                            if (j >= rs->length) {
-                                break;
-                            }
-                            (rs->cpgScore)[j] += score;
                         }
                     }
-                }
-                //fill hashFam
-                struct hashEl *hel4 = hashLookup(hashFam, ss->fname);
-                if (hel4 != NULL) {
-                    struct repfam *fs = (struct repfam *) hel4->val;
-                    fs->cpgCount++;
-                    fs->cpgTotalScore += score;
-                }
-                //fill hashCla
-                struct hashEl *hel5 = hashLookup(hashCla, ss->cname);
-                if (hel5 != NULL) {
-                    struct repcla *cs = (struct repcla *) hel5->val;
-                    cs->cpgCount++;
-                    cs->cpgTotalScore += score;
+                    //fill hashFam
+                    struct hashEl *hel4 = hashLookup(hashFam, ss->fname);
+                    if (hel4 != NULL) {
+                        struct repfam *fs = (struct repfam *) hel4->val;
+                        fs->cpgCount++;
+                        fs->cpgTotalScore += score;
+                    }
+                    //fill hashCla
+                    struct hashEl *hel5 = hashLookup(hashCla, ss->cname);
+                    if (hel5 != NULL) {
+                        struct repcla *cs = (struct repcla *) hel5->val;
+                        cs->cpgCount++;
+                        cs->cpgTotalScore += score;
+                    }
                 }
                 slFreeList(hitList);
                 cpgInRepeat++;
@@ -1155,6 +1160,8 @@ void rmsk2binKeeperHash(char *rmskfile, struct hash *chrHash, struct hash *repHa
         s->length = s->end - s->start;
         s->sl = NULL;
         s->sl_unique = NULL;
+        s->cpgCount = 0;
+        s->cpgTotalScore = 0;
         
         struct hashEl *hel = hashLookup(hash1, s->chr);
         if (hel != NULL) {
@@ -1624,6 +1631,31 @@ void writeFilterOut(struct hash *hash, char *out, int readlist, int threshold, c
     }
     fclose(out_stream);
     fprintf(stderr, "* Total %d [%s] TEs have at least %d reads mapped.\n", j, subfam, threshold);
+}
+
+void writeFilterOutMRE(struct hash *hash, char *out, char *subfam, double scoreThreshold){ 
+    FILE *out_stream;
+    out_stream = mustOpen(out, "w");
+    int j = 0;
+    struct hashEl *he;
+    struct hashCookie cookie = hashFirst(hash);
+        fprintf(out_stream, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", "#chr", "start", "end", "length", "repName", "repClass", "repFamily", "covered_CpG_site", "total_CpG_score");
+    while ( (he = hashNext(&cookie)) != NULL ) {
+        struct binKeeper *bk = (struct binKeeper *) he->val;
+        struct binKeeperCookie becookie = binKeeperFirst(bk);
+        struct binElement *be;
+        while( (be = binKeeperNext(&becookie)) != NULL ){
+            struct rmsk *os = (struct rmsk *) (be->val);
+            double score = os->cpgTotalScore;
+            if (score > scoreThreshold){
+                j++;
+                fprintf(out_stream, "%s\t%d\t%d\t%d\t%s\t%s\t%s\t%d\t%.3f\n", os->chr, os->start, os->end, os->length, os->name, os->cname, os->fname, os->cpgCount, os->cpgTotalScore);
+            }
+        }
+        binKeeperFree(&bk);
+    }
+    fclose(out_stream);
+    fprintf(stderr, "* Total %d [%s] TEs have CpG score larger than %.3f.\n", j, subfam, scoreThreshold);
 }
 
 void sortBedfile(char *bedfile) {

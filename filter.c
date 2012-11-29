@@ -6,16 +6,19 @@ int filter_usage(){
     fprintf(stderr, "Usage:   iteres filter [options] <chromosome size file> <repeat size file> <rmsk.txt> <bam/sam alignment file>\n\n");
     fprintf(stderr, "Options: -S       input is SAM [off]\n");
     fprintf(stderr, "         -Q       mapping Quality threshold [10]\n");
-    fprintf(stderr, "         -N       normalized by number of (1: non-redundant reads, 2: mapped reads, 3: total reads) [1])\n");
+    fprintf(stderr, "         -g       coverage threshold for overlapping [0.0001]\n");
+    fprintf(stderr, "         -N       normalized by number of (0: non-redundant unique mapped reads, 1: unique reads, 2: mapped reads, 3: total reads) [0])\n");
     fprintf(stderr, "         -n       use repName (subfamily) as filter [null]\n");
     fprintf(stderr, "         -f       use repFamily as filter [null]\n");
     fprintf(stderr, "         -c       use repClass as filter [null]\n");
     fprintf(stderr, "         -t       only output repeats have more than [1] reads mapped\n");
     fprintf(stderr, "         -r       output the list of reads [off]\n");
-    fprintf(stderr, "         -D       remove redundant reads [off]\n");
+    fprintf(stderr, "         -R       remove redundant reads [off]\n");
+    fprintf(stderr, "         -T       treat 1 paired-end read as 2 single-end reads [off]\n");
+    fprintf(stderr, "         -D       discard if only one end mapped in a paired end reads [off]\n");
     fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
-    fprintf(stderr, "         -P       Input was paired end data [off]\n");
-    fprintf(stderr, "         -I       Insert length [1000] (force -P)\n");
+    fprintf(stderr, "         -E       extend reads to represent fragment [150], specify 0 if want no extension\n");
+    fprintf(stderr, "         -I       Insert length threshold [500]\n");
     fprintf(stderr, "         -o       output prefix [basename of input without extension]\n");
     fprintf(stderr, "         -h       help message\n");
     fprintf(stderr, "         -?       help message\n");
@@ -33,26 +36,30 @@ int main_filter(int argc, char *argv[]){
     struct hash *hashCla = newHash(0);
     int optSam = 0, optthreshold = 1;
     char *optoutput = NULL, *optname = NULL, *optclass = NULL, *optfamily = NULL;
-    unsigned int optreadlist = 0, optQual = 10, optisize = 1000;
-    int filterField = 0, c, optDup = 0, optNorm = 1, optaddChr = 0, optPair = 0;
-    
+    unsigned int optreadlist = 0, optQual = 10, optisize = 500, optExt = 150;
+    int filterField = 0, c, optDup = 0, optNorm = 0, optaddChr = 0, optDis =0, optTreat = 0;
+    float optCov = 0.0001;
+
     time_t start_time, end_time;
     start_time = time(NULL);
     
-    while ((c = getopt(argc, argv, "SQ:N:n:c:f:rDt:CPI:o:h?")) >= 0) {
+    while ((c = getopt(argc, argv, "SQ:g:N:n:c:t:f:rRTDCE:I:o:h?")) >= 0) {
         switch (c) {
             case 'S': optSam = 1; break;
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
+            case 'g': optCov = atof(optarg); break;
             case 'N': optNorm = (unsigned int)strtol(optarg, 0, 0); break;
             case 't': optthreshold = (unsigned int)strtol(optarg, 0, 0); break;
             case 'r': optreadlist = 1; break;
-            case 'D': optDup = 1; break;
+            case 'R': optDup = 1; break;
+            case 'T': optTreat = 1; break;
+            case 'D': optDis = 1; break;
             case 'C': optaddChr = 1; break;
             case 'n': optname = strdup(optarg); break;
             case 'c': optclass = strdup(optarg); break;
             case 'f': optfamily = strdup(optarg); break;
-            case 'P': optPair = 1; break;
-            case 'I': optisize = (unsigned int)strtol(optarg, 0, 0); optPair = 1; break;
+            case 'E': optExt = (unsigned int)strtol(optarg, 0, 0); break;
+            case 'I': optisize = (unsigned int)strtol(optarg, 0, 0); break;
             case 'o': optoutput = strdup(optarg); break;
             case 'h':
             case '?': return filter_usage(); break;
@@ -72,13 +79,13 @@ int main_filter(int argc, char *argv[]){
     
     int nindex = 0;
     if (optNorm == 0){
-        nindex = 4;
+        nindex = 7;
     } else if (optNorm == 1){
-        nindex = 3;
+        nindex = 8;
     } else if (optNorm == 2) {
-        nindex = 1;    
+        nindex = 6;    
     } else if (optNorm == 3) {
-        nindex = 0;    
+        nindex = 4;    
     } else{
         errAbort("Wrong normalization method specified");
     }
@@ -119,11 +126,13 @@ int main_filter(int argc, char *argv[]){
     
     //sam file
     fprintf(stderr, "* Start to parse the SAM/BAM file\n");
-    if (optPair){
-        cnt = PEsamFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr, optisize);
-    } else {
-        cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr);
-    }
+    //if (optPair){
+    //    cnt = PEsamFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr, optisize);
+    //} else {
+    //    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr);
+    //}
+    cnt = samFile2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat, NULL, NULL);
+
 
     fprintf(stderr, "* Preparing the output file\n");
     if (asprintf(&out, "%s_%s.iteres.loci", output, subfam) < 0)

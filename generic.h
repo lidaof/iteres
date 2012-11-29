@@ -15,6 +15,8 @@ struct rmsk {
     char *name, *fname, *cname;
     struct slName *sl;
     struct slName *sl_unique;
+    unsigned int cpgCount;
+    double cpgTotalScore;
 };
 
 //struct hold contents for repeat subfamily
@@ -73,6 +75,8 @@ int cpg_usage();
 int main_cpg(int argc, char *argv[]);
 int cpgstat_usage();
 int main_cpgstat(int argc, char *argv[]);
+int cpgfilter_usage();
+int main_cpgfilter (int argc, char *argv[]);
 
 
 char *get_filename_without_ext(char *filename);
@@ -98,5 +102,6 @@ double calCpGscore (struct mreFrag *mre, unsigned long long int *cnt);
 unsigned long long int  CpGscorebedGraph(struct hash *hash, unsigned long long int *cnt, char *outfile);
 void fragmentStats(struct hash *hash, unsigned long long int *cnt2, unsigned int mapQ, unsigned long long int *cnt, unsigned long long int cnt1, char *outfile, int minlen, int maxlen, int win);
 char *print_bar(int x);
-void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla);
+void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int filter);
 void MREwriteWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash2, char *of1, char *of2, char *of3, char *of4);
+void writeFilterOutMRE(struct hash *hash, char *out, char *subfam, double scoreThreshold); 

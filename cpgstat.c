@@ -29,7 +29,7 @@ int main_cpgstat (int argc, char *argv[]) {
             case 'w': optkeepWig = 1; break;
             case 'o': optoutput = strdup(optarg); break;
             case 'h':
-            case '?': return stat_usage(); break;
+            case '?': return cpgstat_usage(); break;
             default: return 1;
         }
     }
@@ -66,7 +66,7 @@ int main_cpgstat (int argc, char *argv[]) {
     
     //bedgraph file
     fprintf(stderr, "* Start to parse the bedGraph file\n");
-    cpgBedGraphOverlapRepeat(bedgraph_file, hashRmsk, hashRep, hashFam, hashCla);
+    cpgBedGraphOverlapRepeat(bedgraph_file, hashRmsk, hashRep, hashFam, hashCla, 0);
 
     fprintf(stderr, "* Writing stats and Wig file\n");
     MREwriteWigandStat(hashRep, hashFam, hashCla, outStat, outWig, outFam, outCla);
