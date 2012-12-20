@@ -161,7 +161,7 @@ int main (int argc, char *argv[]) {
     
     samfile_t *samfp;
     char *output, prn[200], *outerr, *outerr2;
-    int mapped_reads_num, reads_num, mapped_to_loc, mapped_to_subfam;
+    int mapped_reads_num, reads_num, mapped_to_loc, mapped_to_subfam, unique_right, unique_wrong, multi_right, multi_wrong;
     struct arguments arguments;
     struct hash *hash = hashNew(0);
     
@@ -185,6 +185,7 @@ int main (int argc, char *argv[]) {
 
 
     reads_num = mapped_reads_num = mapped_to_loc = mapped_to_subfam = 0;
+    unique_right = unique_wrong = multi_right = multi_wrong = 0;
 
     /* set default parameters*/
     
@@ -278,7 +279,15 @@ int main (int argc, char *argv[]) {
             if (sameWord(readChr, sa->chr) && (abs(readStart + readRealstart - sa->start) < 5)) {
                 mapped_to_loc++;
                 mapped_to_subfam++;
+                if (sa->qual >= 10)
+                    unique_right++;
+                else
+                    multi_right++;
             }else{
+                if (sa->qual >= 10)
+                    unique_wrong++;
+                else
+                    multi_wrong++;
                 struct binElement *hitList = NULL, *hit;
                 struct hashEl *hel2 = hashLookup(hash, sa->chr);
                 if (hel2 != NULL) {
@@ -353,6 +362,10 @@ int main (int argc, char *argv[]) {
     fprintf(out_stream, "* Total %d reads mapped.\n", mapped_reads_num);
     fprintf(out_stream, "* Total %d reads mapped to right location.\n", mapped_to_loc);
     fprintf(out_stream, "* Total %d reads mapped to right subfamily.\n", mapped_to_subfam);
+    fprintf(out_stream, "* Total %d unique reads mapped to right location.\n", unique_right);
+    fprintf(out_stream, "* Total %d unique reads mapped to wrong location.\n", unique_wrong);
+    fprintf(out_stream, "* Total %d multi reads mapped to right location.\n", multi_right);
+    fprintf(out_stream, "* Total %d multi reads mapped to wrong location.\n", multi_wrong);
     
     fclose(out_stream);
     
