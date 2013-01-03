@@ -38,10 +38,11 @@ void writeReport(char *outfile, unsigned long long int *cnt, unsigned int mapQ, 
     fprintf(f, "used read ends 1: %llu\n", cnt[4]);
     fprintf(f, "used read ends 2: %llu\n", cnt[5]);
     fprintf(f, "mappable reads (pair): %llu\n", cnt[6]);
+    fprintf(f, "non-redundant mappable reads (pair): %llu\n", cnt[8]);
     fprintf(f, "unique mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
-    fprintf(f, "non-redundant reads (pair): %llu\n", cnt[8]);
-    fprintf(f, "reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[9]);
-    fprintf(f, "unique mapped reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[10]);
+    fprintf(f, "non-redundant unique mapped reads (pair): %llu\n", cnt[11]);
+    fprintf(f, "non-redundant reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[9]);
+    fprintf(f, "non-redundant unique mapped reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[10]);
     carefulClose(&f);
 }
 
@@ -55,8 +56,9 @@ void writeReportDensity(char *outfile, unsigned long long int *cnt, unsigned int
     fprintf(f, "used read ends 1: %llu\n", cnt[4]);
     fprintf(f, "used read ends 2: %llu\n", cnt[5]);
     fprintf(f, "mappable reads (pair): %llu\n", cnt[6]);
+    fprintf(f, "non-redundant mappable reads (pair): %llu\n", cnt[8]);
     fprintf(f, "unique mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
-    fprintf(f, "non-redundant reads (pair): %llu\n", cnt[8]);
+    fprintf(f, "non-redundant unique mapped reads (pair): %llu\n", cnt[9]);
     carefulClose(&f);
 }
 
@@ -296,12 +298,13 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
     FILE *outbed_f = NULL, *outbed_unique_f = NULL;
     char chr[100], key[100], strand;
     unsigned int start, end, cend, rstart, rend;
-    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 11);
+    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 12);
     //unsigned long long int mapped_reads_num = 0, reads_num = 0, reads_used = 0, unique_reads = 0, repeat_reads = 0;
     unsigned long long int read_end1 = 0, read_end2 = 0;
     unsigned long long int read_end1_mapped = 0, read_end2_mapped = 0;
     unsigned long long int read_end1_used = 0, read_end2_used = 0;
     unsigned long long int reads_nonredundant = 0;
+    unsigned long long int reads_nonredundant_unique = 0;
     unsigned long long int reads_mapped = 0;
     unsigned long long int reads_mapped_unique = 0;
     unsigned long long int reads_repeat = 0;
@@ -500,6 +503,8 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
             }
         }
         reads_nonredundant++;
+        if (b->core.qual >= mapQ)
+            reads_nonredundant_unique++;
         //output bed
         if (outbed_f)
             fprintf(outbed_f, "%s\t%u\t%u\t%s\t%i\t%c\n", chr, start, end, bam1_qname(b), b->core.qual, strand);
@@ -615,6 +620,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
     cnt[8] = reads_nonredundant;
     cnt[9] = reads_repeat;
     cnt[10] = reads_repeat_unique;
+    cnt[11] = reads_nonredundant_unique;
     return cnt;
 }
 
@@ -700,11 +706,12 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
     FILE *outbed_f = mustOpen(outbed, "w");
     char chr[100], key[100], strand;
     unsigned int start, end, cend;
-    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 9);
+    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 10);
     unsigned long long int read_end1 = 0, read_end2 = 0;
     unsigned long long int read_end1_mapped = 0, read_end2_mapped = 0;
     unsigned long long int read_end1_used = 0, read_end2_used = 0;
     unsigned long long int reads_nonredundant = 0;
+    unsigned long long int reads_nonredundant_unique = 0;
     unsigned long long int reads_mapped = 0;
     unsigned long long int reads_mapped_unique = 0;
     struct hash *nochr = newHash(0), *dup = newHash(0);
@@ -894,6 +901,8 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
             }
         }
         reads_nonredundant++;
+        if (b->core.qual >= mapQ)
+            reads_nonredundant_unique++;
         //output bed
         int i, qlen = b->core.l_qseq;
         if(b->core.qual >= mapQ){
@@ -939,6 +948,7 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
     cnt[6] = reads_mapped;
     cnt[7] = reads_mapped_unique;
     cnt[8] = reads_nonredundant;
+    cnt[9] = reads_nonredundant_unique;
     return cnt;
 }
 
