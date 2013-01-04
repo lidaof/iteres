@@ -1322,7 +1322,7 @@ unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char
     FILE *f  = mustOpen(outBed, "w");
     char strand, *row[20], *line;
     struct lineFile *inBedStream = lineFileOpen(inBed, TRUE);
-    char key1[30]; //key2[30];
+    char key1[100]; //key2[100];
     int start, end, rstart, rend;
     unsigned long long int CCGG = 0, CCGC = 0, GCGC = 0, ACGT = 0, CGCG = 0, unknown = 0;
     unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 6);
@@ -1425,7 +1425,7 @@ unsigned long long int CpGscorebedGraph(struct hash *hash, unsigned long long in
     struct hashCookie cookie = hashFirst(hash);
     unsigned long long int c = 0; //count for covered CpG site
     double score = 0;
-    char key[50]; //key2[50];
+    char key[100]; //key2[100];
     struct hash *cpgHash = newHash(0);
     while ( (hel = hashNext(&cookie)) != NULL ){
         struct mreFrag *mre = (struct mreFrag *) hel->val;
@@ -1566,7 +1566,7 @@ void fragmentStats(struct hash *hash, unsigned long long int *cnt2, unsigned int
     fprintf(f, "    mapped read ends 2: %llu\n", cnt2[3]);
     fprintf(f, "    used read ends 1: %llu\n", cnt2[4]);
     fprintf(f, "    used read ends 2: %llu\n", cnt2[5]);
-    fprintf(f, "non-redundant reads (pair): %llu\n\n", cnt2[8]);
+    //fprintf(f, "non-redundant reads (pair): %llu\n\n", cnt2[8]);
     fprintf(f, "mappable reads (pair): %llu\n", cnt2[6]);
     fprintf(f, "unique mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt2[7]);
     fprintf(f, "mre filtered reads:\t%llu\n", cnt[0]+cnt[1]+cnt[2]+cnt[3]+cnt[4]);

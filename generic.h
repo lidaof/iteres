@@ -47,7 +47,7 @@ struct repcla {
 };
 
 struct mreFrag {
-    char pair[40], chr[20];
+    char pair[100], chr[50];
     unsigned long long int reads_count;
     int head, start, end;
     char site[5]; //dont forget \0
@@ -60,7 +60,7 @@ struct range {
 struct cpgScore {
     int start;
     double score;
-    char chr[20];
+    char chr[50];
 };
 
 int stat_usage();
