@@ -1318,8 +1318,34 @@ struct hash *MREfrag2Hash (char *fragfile, int minlen, int maxlen){
     return hash;
 }
 
-unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char *outBed, int call){
+unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char *outBed, int call, char *prefix){
     FILE *f  = mustOpen(outBed, "w");
+    //if (strcmp(prefix, "NULL") != 0){
+        char *out1 = malloc(200);
+        char *out2 = malloc(200);
+        char *out3 = malloc(200);
+        char *out4 = malloc(200);
+        char *out5 = malloc(200);
+        char *out6 = malloc(200);
+        if (sprintf(out1, "%s_CCGG_reads.txt", prefix) < 0)
+            errAbort("Mem error");
+        if (sprintf(out2, "%s_CCGC_reads.txt", prefix) < 0)
+            errAbort("Mem error");
+        if (sprintf(out3, "%s_GCGC_reads.txt", prefix) < 0)
+            errAbort("Mem error");
+        if (sprintf(out4, "%s_ACGT_reads.txt", prefix) < 0)
+            errAbort("Mem error");
+        if (sprintf(out5, "%s_CGCG_reads.txt", prefix) < 0)
+            errAbort("Mem error");
+        if (sprintf(out6, "%s_unknown_reads.txt", prefix) < 0)
+            errAbort("Mem error");
+        FILE *f1 = mustOpen(out1, "w");
+        FILE *f2 = mustOpen(out2, "w");
+        FILE *f3 = mustOpen(out3, "w");
+        FILE *f4 = mustOpen(out4, "w");
+        FILE *f5 = mustOpen(out5, "w");
+        FILE *f6 = mustOpen(out6, "w");
+    //}
     char strand, *row[20], *line;
     struct lineFile *inBedStream = lineFileOpen(inBed, TRUE);
     char key1[100]; //key2[100];
@@ -1357,14 +1383,24 @@ unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char
             mre->reads_count++;
             if (sameWord(mre->site, "CCGG")) {
                 CCGG++;
+                //if (strcmp(prefix, "NULL") != 0)
+                    fprintf(f1, "%s\t%i\t%i\t%s\t%s\t%c\n", row[0], rstart, rend, row[3], row[4], strand);
             } else if (sameWord(mre->site, "CCGC") || sameWord(mre->site, "GCGG")) {
                 CCGC++;
+                //if (strcmp(prefix, "NULL") != 0)
+                    fprintf(f2, "%s\t%i\t%i\t%s\t%s\t%c\n", row[0], rstart, rend, row[3], row[4], strand);
             } else if (sameWord(mre->site, "GCGC")){
                 GCGC++;
+                //if (strcmp(prefix, "NULL") != 0)
+                    fprintf(f3, "%s\t%i\t%i\t%s\t%s\t%c\n", row[0], rstart, rend, row[3], row[4], strand);
             } else if (sameWord(mre->site, "ACGT")){
                 ACGT++;
+                //if (strcmp(prefix, "NULL") != 0)
+                    fprintf(f4, "%s\t%i\t%i\t%s\t%s\t%c\n", row[0], rstart, rend, row[3], row[4], strand);
             } else if (sameWord(mre->site, "CGCG")){
                 CGCG++;
+                //if (strcmp(prefix, "NULL") != 0)
+                    fprintf(f5, "%s\t%i\t%i\t%s\t%s\t%c\n", row[0], rstart, rend, row[3], row[4], strand);
             }
         /*} else if(hel2 != NULL){
             bedOutputN(bed, 6, f, '\t', '\n');
@@ -1383,10 +1419,20 @@ unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char
             }*/
         } else {
             unknown++;
+            //if (strcmp(prefix, "NULL") != 0)
+                fprintf(f6, "%s\t%i\t%i\t%s\t%s\t%c\n", row[0], rstart, rend, row[3], row[4], strand);
         }
     }
     carefulClose(&f);
     lineFileClose(&inBedStream);
+    //if (strcmp(prefix, "NULL") != 0){
+        carefulClose(&f1);
+        carefulClose(&f2);
+        carefulClose(&f3);
+        carefulClose(&f4);
+        carefulClose(&f5);
+        carefulClose(&f6);
+    //}
     //bedFreeList(&bedList);
     cnt[0] = CCGG;
     cnt[1] = CCGC;
