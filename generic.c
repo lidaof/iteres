@@ -31,34 +31,34 @@ double cal_rpm (unsigned long long int reads_count, unsigned long long int mappe
 void writeReport(char *outfile, unsigned long long int *cnt, unsigned int mapQ, char *subfam){
     FILE *f = mustOpen(outfile, "w");
     fprintf(f, "total reads (pair): %llu\n", cnt[0]);
-    fprintf(f, "read ends 1: %llu\n", cnt[0]);
-    fprintf(f, "read ends 2: %llu\n", cnt[1]);
-    fprintf(f, "mapped read ends 1: %llu\n", cnt[2]);
-    fprintf(f, "mapped read ends 2: %llu\n", cnt[3]);
-    fprintf(f, "used read ends 1: %llu\n", cnt[4]);
-    fprintf(f, "used read ends 2: %llu\n", cnt[5]);
+    //fprintf(f, "read ends 1: %llu\n", cnt[0]);
+    //fprintf(f, "read ends 2: %llu\n", cnt[1]);
+    //fprintf(f, "mapped read ends 1: %llu\n", cnt[2]);
+    //fprintf(f, "mapped read ends 2: %llu\n", cnt[3]);
+    //fprintf(f, "used read ends 1: %llu\n", cnt[4]);
+    //fprintf(f, "used read ends 2: %llu\n", cnt[5]);
     fprintf(f, "mappable reads (pair): %llu\n", cnt[6]);
-    fprintf(f, "non-redundant mappable reads (pair): %llu\n", cnt[8]);
-    fprintf(f, "unique mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
-    fprintf(f, "non-redundant unique mapped reads (pair): %llu\n", cnt[11]);
-    fprintf(f, "non-redundant reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[9]);
-    fprintf(f, "non-redundant unique mapped reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[10]);
+    //fprintf(f, "non-redundant mappable reads (pair): %llu\n", cnt[8]);
+    fprintf(f, "uniquely mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
+    fprintf(f, "non-redundant uniquely mapped reads (pair): %llu\n", cnt[11]);
+    //fprintf(f, "non-redundant reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[9]);
+    fprintf(f, "non-redundant uniquely mapped reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[10]);
     carefulClose(&f);
 }
 
 void writeReportDensity(char *outfile, unsigned long long int *cnt, unsigned int mapQ){
     FILE *f = mustOpen(outfile, "w");
     fprintf(f, "total reads (pair): %llu\n", cnt[0]);
-    fprintf(f, "read ends 1: %llu\n", cnt[0]);
-    fprintf(f, "read ends 2: %llu\n", cnt[1]);
-    fprintf(f, "mapped read ends 1: %llu\n", cnt[2]);
-    fprintf(f, "mapped read ends 2: %llu\n", cnt[3]);
-    fprintf(f, "used read ends 1: %llu\n", cnt[4]);
-    fprintf(f, "used read ends 2: %llu\n", cnt[5]);
+    fprintf(f, "  read ends 1: %llu\n", cnt[0]);
+    fprintf(f, "  read ends 2: %llu\n", cnt[1]);
+    fprintf(f, "  mapped read ends 1: %llu\n", cnt[2]);
+    fprintf(f, "  mapped read ends 2: %llu\n", cnt[3]);
+    fprintf(f, "  used read ends 1: %llu\n", cnt[4]);
+    fprintf(f, "  used read ends 2: %llu\n", cnt[5]);
     fprintf(f, "mappable reads (pair): %llu\n", cnt[6]);
-    fprintf(f, "non-redundant mappable reads (pair): %llu\n", cnt[8]);
-    fprintf(f, "unique mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
-    fprintf(f, "non-redundant unique mapped reads (pair): %llu\n", cnt[9]);
+    //fprintf(f, "non-redundant mappable reads (pair): %llu\n", cnt[8]);
+    fprintf(f, "uniquely mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
+    fprintf(f, "non-redundant uniquely mapped reads (pair): %llu\n", cnt[9]);
     carefulClose(&f);
 }
 
@@ -412,7 +412,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                 if (strand == '+'){
                     end = min(start + extension, cend);
                 }else{
-                    if (start < extension)
+                    if (end < extension)
                         start = 0;
                     else
                         start = end - extension;
@@ -461,7 +461,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                         if (strand == '+'){
                             end = min(start + extension, cend);
                         }else{
-                            if (start < extension)
+                            if (end < extension)
                                 start = 0;
                             else
                                 start = end - extension;
@@ -482,7 +482,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                 if (strand == '+'){
                     end = min(start + extension, cend);
                 }else{
-                    if (start < extension)
+                    if (end < extension)
                         start = 0;
                     else
                         start = end - extension;
@@ -811,7 +811,7 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
                 if (strand == '+'){
                     end = min(start + extension, cend);
                 }else{
-                    if (start < extension)
+                    if (end < extension)
                         start = 0;
                     else
                         start = end - extension;
@@ -860,7 +860,7 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
                         if (strand == '+'){
                             end = min(start + extension, cend);
                         }else{
-                            if (start < extension)
+                            if (end < extension)
                                 start = 0;
                             else
                                 start = end - extension;
@@ -881,7 +881,7 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
                 if (strand == '+'){
                     end = min(start + extension, cend);
                 }else{
-                    if (start < extension)
+                    if (end < extension)
                         start = 0;
                     else
                         start = end - extension;

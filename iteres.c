@@ -1,6 +1,6 @@
 #include "generic.h"
 
-#define ITERES_VERSION "0.2.8-r102"
+#define ITERES_VERSION "0.2.8-r103"
 
 static int usage() {
     fprintf(stderr, "\n");
