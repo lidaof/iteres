@@ -676,14 +676,14 @@ freeHash(&seenHash);
 }
 
 int density_usage(){
-    fprintf(stderr, "\n");
+    //fprintf(stderr, "\n");
     fprintf(stderr, "\nWorks as ChipSeqHandler program.\nPlease noticed that if reads mapped to the chromosomes which didn't existed in size file, this type of reads will be discarded.\n");
     fprintf(stderr, "Usage:   iteres density [options] <chromosome size file> <bam/sam alignment file>\n\n");
     fprintf(stderr, "Options: -S       input is SAM [off]\n");
     fprintf(stderr, "         -Q       unique reads mapping Quality threshold [10]\n");
     fprintf(stderr, "         -r       do NOT remove redundant reads [off]\n");
     fprintf(stderr, "         -T       treat 1 paired-end read as 2 single-end reads [off]\n");
-    fprintf(stderr, "         -D       discard if only one end mapped in a paired end reads [off]\n");
+    fprintf(stderr, "         -D       do NOT discard if only one end mapped in a paired end reads [off]\n");
     fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
     fprintf(stderr, "         -E       extend reads to represent fragment [150], specify 0 if want no extension\n");
     fprintf(stderr, "         -I       Insert length threshold [500]\n");
@@ -699,7 +699,7 @@ int main_density (int argc, char *argv[]) {
     
     char *output, *outReportfile, *outExtfile, *outbedGraphfile, *outbigWigfile;
     unsigned long long int *cnt;
-    int optSam = 0, c, optDup = 1, optaddChr = 0, optDis = 0, optTreat = 0;
+    int optSam = 0, c, optDup = 1, optaddChr = 0, optDis = 1, optTreat = 0;
     unsigned int optQual = 10, optExt = 150, optisize = 500;
     char *optoutput = NULL;
     time_t start_time, end_time;
@@ -711,7 +711,7 @@ int main_density (int argc, char *argv[]) {
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
             case 'r': optDup = 0; break;
             case 'T': optTreat = 1; break;
-            case 'D': optDis = 1; break;
+            case 'D': optDis = 0; break;
             case 'C': optaddChr = 1; break;
             case 'E': optExt = (unsigned int)strtol(optarg, 0, 0); break;
             case 'I': optisize = (unsigned int)strtol(optarg, 0, 0); break;

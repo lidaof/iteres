@@ -1,7 +1,7 @@
 #include "generic.h"
 
 int cpg_usage(){
-    fprintf(stderr, "\n");
+    //fprintf(stderr, "\n");
     fprintf(stderr, "Works like MRESeqHandler.\n\n");
     fprintf(stderr, "Usage:   iteres cpg [options] <chromosome size file> <MRE fragment file> <bam/sam alignment file>\n\n");
     fprintf(stderr, "Options: -S       input is SAM [off]\n");
