@@ -131,11 +131,11 @@ int main_stat (int argc, char *argv[]) {
     struct hash *chrHash = hashNameIntFile(chr_size_file);
     struct hash *repHash = hashNameIntFile(rep_size_file);
     
-    fprintf(stderr, "* Start to parse the rmsk file\n");
+    fprintf(stderr, "* Parsing the rmsk file\n");
     rmsk2binKeeperHash(rmsk_file, chrHash, repHash, &hashRmsk, &hashRep, &hashFam, &hashCla, 0, "ALL");
     
     //sam file
-    fprintf(stderr, "* Start to parse the SAM/BAM file\n");
+    fprintf(stderr, "* Parsing the SAM/BAM file\n");
     //if (optPair){
     //    cnt = PEsamFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr, optisize);
     //} else {

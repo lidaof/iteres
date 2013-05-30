@@ -683,6 +683,7 @@ int density_usage(){
     fprintf(stderr, "         -Q       unique reads mapping Quality threshold [10]\n");
     fprintf(stderr, "         -r       do NOT remove redundant reads [off]\n");
     fprintf(stderr, "         -T       treat 1 paired-end read as 2 single-end reads [off]\n");
+    fprintf(stderr, "         -m       specify a CpG bed file for calculating CpG stats [null]\n");
     fprintf(stderr, "         -D       do NOT discard if only one end mapped in a paired end reads [off]\n");
     fprintf(stderr, "         -C       Add 'chr' string as prefix of reference sequence [off]\n");
     fprintf(stderr, "         -E       extend reads to represent fragment [150], specify 0 if want no extension\n");
@@ -697,20 +698,22 @@ int density_usage(){
 /* main function */
 int main_density (int argc, char *argv[]) {
     
-    char *output, *outReportfile, *outExtfile, *outbedGraphfile, *outbigWigfile;
+    char *output, *outReportfile, *outExtfile, *outbedGraphfile, *outbigWigfile, *outCountfile, *outCovfile;
     unsigned long long int *cnt;
     int optSam = 0, c, optDup = 1, optaddChr = 0, optDis = 1, optTreat = 0;
     unsigned int optQual = 10, optExt = 150, optisize = 500;
-    char *optoutput = NULL;
+    char *optoutput = NULL, *optm = NULL;
     time_t start_time, end_time;
     start_time = time(NULL);
+    struct slInt *cpgCount = NULL;
     
-    while ((c = getopt(argc, argv, "SQ:rTDCo:E:I:h?")) >= 0) {
+    while ((c = getopt(argc, argv, "SQ:rTm:DCo:E:I:h?")) >= 0) {
         switch (c) {
             case 'S': optSam = 1; break;
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
             case 'r': optDup = 0; break;
             case 'T': optTreat = 1; break;
+            case 'm': optm = strdup(optarg); break;
             case 'D': optDis = 0; break;
             case 'C': optaddChr = 1; break;
             case 'E': optExt = (unsigned int)strtol(optarg, 0, 0); break;
@@ -727,6 +730,14 @@ int main_density (int argc, char *argv[]) {
     char *chr_size_file = argv[optind];
     char *sam_file = argv[optind+1];
     
+    struct hash *hash = hashNameIntFile(chr_size_file);
+    struct hash *cpgHash = newHash(0);
+    if (optm != NULL){
+        fprintf(stderr, "* CpG bed file %s provided, will calculate CpG stats\n", optm);
+        fprintf(stderr, "* Reading the CpG bed file\n");
+        cpgHash = cpgBed2BinKeeperHash(hash, optm);
+    }
+
     if(optoutput) {
         output = optoutput;
     } else {
@@ -742,12 +753,18 @@ int main_density (int argc, char *argv[]) {
         errAbort("Mem Error.\n");
     if (asprintf(&outReportfile, "%s.report", output) < 0)
         errAbort("Preparing output wrong");
-    
-    struct hash *hash = hashNameIntFile(chr_size_file);
+    if (asprintf(&outCountfile, "%s.cpgCount", output) < 0)
+        errAbort("Preparing output wrong");
+    if (asprintf(&outCovfile, "%s.cpgCoverage", output) < 0)
+        errAbort("Preparing output wrong");
     
     //sam file to bed file
-    fprintf(stderr, "* Start to parse the SAM/BAM file ...\n");
-    cnt = sam2bed(sam_file, outExtfile, hash, optSam, optQual, optDup, optaddChr, optDis, optisize, optExt, optTreat);
+    fprintf(stderr, "* Parsing the SAM/BAM file\n");
+    if (optm == NULL){
+        cnt = sam2bed(sam_file, outExtfile, hash, optSam, optQual, optDup, optaddChr, optDis, optisize, optExt, optTreat);
+    }else{
+        cnt = sam2bedwithCpGstat(sam_file, outExtfile, hash, cpgHash, &cpgCount, optSam, optQual, optDup, optaddChr, optDis, optisize, optExt, optTreat);
+    }
     //sort
     //fprintf(stderr, "\n* Sorting\n");
     //bedSortFile(outBedfile, outBedfile);
@@ -768,6 +785,15 @@ int main_density (int argc, char *argv[]) {
     //    bedSortFile(outExtfile, outExtfile);
     //}
 
+    if (optm != NULL){
+        fprintf(stderr, "* Generating CpG stats\n");
+        writecpgCount(cpgCount, outCountfile);
+        writecpgCov(cpgHash, outCovfile);
+        hashFree(&cpgHash);
+        slFreeList(&cpgCount);
+    }
+    //exit(1);
+    
     //sort extend bed
     fprintf(stderr, "* Sorting extended bed\n");
     sortBedfile(outExtfile);
@@ -784,6 +810,7 @@ int main_density (int argc, char *argv[]) {
     //write report file
     fprintf(stderr, "* Preparing report file\n");
     writeReportDensity(outReportfile, cnt, optQual);
+
     
     //cleaning
     hashFree(&hash);

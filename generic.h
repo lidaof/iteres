@@ -63,6 +63,10 @@ struct cpgScore {
     char chr[50];
 };
 
+struct cpgC {
+    int c;
+};
+
 int stat_usage();
 int main_stat(int argc, char *argv[]);
 int filter_usage();
@@ -105,3 +109,9 @@ char *print_bar(int x);
 void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int filter);
 void MREwriteWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash2, char *of1, char *of2, char *of3, char *of4);
 void writeFilterOutMRE(struct hash *hash, char *out, char *subfam, double scoreThreshold); 
+boolean binKeeperAnyInclude(struct binKeeper *bk, int start, int end);
+int binKeeperCpGstat(struct binKeeper *bk, int start, int end);
+void writecpgCount(struct slInt *cpgCount, char *outfile);
+void writecpgCov(struct hash *cpgHash, char *outfile);
+struct hash *cpgBed2BinKeeperHash (struct hash *chrHash, char *cpgbedfile);
+unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct hash *chrHash, struct hash *cpgHash, struct slInt **cpgCount, int isSam, unsigned int mapQ, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, int treat);

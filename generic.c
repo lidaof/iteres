@@ -2,6 +2,12 @@
 
 int8_t seq_comp_table[16] = { 0, 8, 4, 12, 2, 10, 9, 14, 1, 6, 5, 13, 3, 11, 7, 15 };
 
+static int binOffsetsExtended[] =
+	{4096+512+64+8+1, 512+64+8+1, 64+8+1, 8+1, 1, 0};
+
+#define _binFirstShift 17	/* How much to shift to get to finest bin. */
+#define _binNextShift 3		/* How much to shift to get to next larger bin. */
+
 /* definitions of functions */
 
 char *get_filename_without_ext(char *filename) {
@@ -26,6 +32,68 @@ double cal_rpkm (unsigned long long int reads_count, unsigned long long int tota
 
 double cal_rpm (unsigned long long int reads_count, unsigned long long int mapped_reads_num) {
     return reads_count / (mapped_reads_num * 1e-6 );
+}
+
+boolean binKeeperAnyInclude(struct binKeeper *bk, int start, int end){
+/* Return TRUE if start/end includes any items in binKeeper. */
+struct binElement *el;
+int startBin, endBin;
+int i,j, len;
+
+if (start < bk->minPos) start = bk->minPos;
+if (end > bk->maxPos) end = bk->maxPos;
+if (start >= end) return FALSE;
+startBin = (start>>_binFirstShift);
+endBin = ((end-1)>>_binFirstShift);
+for (i=0; i<ArraySize(binOffsetsExtended); ++i)
+    {
+    int offset = binOffsetsExtended[i];
+    for (j=startBin+offset; j<=endBin+offset; ++j)
+        {
+	for (el=bk->binLists[j]; el != NULL; el = el->next)
+	    {
+            len = el->end - el->start;
+	    if (rangeIntersection(el->start, el->end, start, end) >= len)
+	        {
+		return TRUE;
+		}
+	    }
+	}
+    startBin >>= _binNextShift;
+    endBin >>= _binNextShift;
+    }
+return FALSE;
+}
+
+int binKeeperCpGstat(struct binKeeper *bk, int start, int end) {
+    /* get stat for cpg */
+    struct binElement *el;
+    int startBin, endBin;
+    int i,j, len, c=0;
+    //struct slInt *cc;
+    if (start < bk->minPos) start = bk->minPos;
+    if (end > bk->maxPos) end = bk->maxPos;
+    startBin = (start>>_binFirstShift);
+    endBin = ((end-1)>>_binFirstShift);
+    for (i=0; i<ArraySize(binOffsetsExtended); ++i){
+        int offset = binOffsetsExtended[i];
+        for (j=startBin+offset; j<=endBin+offset; ++j){
+            for (el=bk->binLists[j]; el != NULL; el = el->next){
+                len = el->end - el->start;
+                if (rangeIntersection(el->start, el->end, start, end) >= len){
+                    struct cpgC *oc = (struct cpgC *) el->val;
+                    (oc->c)++;
+                    c++;
+        	}
+           }
+        }
+        startBin >>= _binNextShift;
+        endBin >>= _binNextShift;
+    }
+    //cc = slIntNew(c);
+    //slAddHead(&cpgCount, cc);
+    return c;
+    //fprintf(stderr, "read have %d CpG\n", c);
 }
 
 void writeReport(char *outfile, unsigned long long int *cnt, unsigned int mapQ, char *subfam){
@@ -59,6 +127,33 @@ void writeReportDensity(char *outfile, unsigned long long int *cnt, unsigned int
     //fprintf(f, "non-redundant mappable reads (pair): %llu\n", cnt[8]);
     fprintf(f, "uniquely mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
     fprintf(f, "non-redundant uniquely mapped reads (pair): %llu\n", cnt[9]);
+    carefulClose(&f);
+}
+
+void writecpgCount(struct slInt *cpgCount, char *outfile){
+    struct slInt *c;
+    //fprintf(stderr, "%d elements in cpgCount", slCount(cpgCount));
+    FILE *f = mustOpen(outfile, "w");
+    for ( c = cpgCount; c != NULL; c = c->next){
+        fprintf(f, "%d\n", c->val);
+    }
+    carefulClose(&f);
+}
+
+void writecpgCov(struct hash *cpgHash, char *outfile){
+    struct hashEl *hel;
+    struct hashCookie cookie = hashFirst(cpgHash);
+    FILE *f = mustOpen(outfile, "w");
+    while ( (hel = hashNext(&cookie)) != NULL ) {
+        struct binKeeper *bk = (struct binKeeper *) hel->val;
+        struct binKeeperCookie becookie = binKeeperFirst(bk);
+        struct binElement *be;
+        while( (be = binKeeperNext(&becookie)) != NULL ){
+            struct cpgC *oc = (struct cpgC *) be->val;
+            fprintf(f, "%i\n", oc->c);
+        }
+        binKeeperFree(&bk);
+    }
     carefulClose(&f);
 }
 
@@ -952,6 +1047,267 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
     return cnt;
 }
 
+unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct hash *chrHash, struct hash *cpgHash, struct slInt **cpgCount, int isSam, unsigned int mapQ, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, int treat) {
+    samfile_t *samfp;
+    FILE *outbed_f = mustOpen(outbed, "w");
+    struct slInt *countcpg = NULL;
+    char chr[100], key[100], strand;
+    unsigned int start, end, cend;
+    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 10);
+    unsigned long long int read_end1 = 0, read_end2 = 0;
+    unsigned long long int read_end1_mapped = 0, read_end2_mapped = 0;
+    unsigned long long int read_end1_used = 0, read_end2_used = 0;
+    unsigned long long int reads_nonredundant = 0;
+    unsigned long long int reads_nonredundant_unique = 0;
+    unsigned long long int reads_mapped = 0;
+    unsigned long long int reads_mapped_unique = 0;
+    struct hash *nochr = newHash(0), *dup = newHash(0);
+    if (isSam) {
+        if ( (samfp = samopen(samfile, "r", 0)) == 0) {
+            fprintf(stderr, "Fail to open SAM file %s\n", samfile);
+            errAbort("Error\n");
+        }
+    } else {
+        if ( (samfp = samopen(samfile, "rb", 0)) == 0) {
+            fprintf(stderr, "Fail to open BAM file %s\n", samfile);
+            errAbort("Error\n");
+        }
+    }
+    bam1_t *b;
+    bam_header_t *h;
+    h = samfp->header;
+    b = bam_init1();
+    int8_t *buf;
+    int max_buf;
+    buf = 0;
+    max_buf = 0;
+    uint8_t *seq;
+    while ( samread(samfp, b) >= 0) {
+        if (b->core.flag & BAM_FPAIRED) {
+            if (b->core.flag & BAM_FREAD1){
+                read_end1++;
+            }else{
+                if(treat)
+                    read_end1++;
+                else
+                    read_end2++;
+            }
+        }else{
+            read_end1++;
+        }
+        if (((read_end1 + read_end2) % 10000) == 0)
+            fprintf(stderr, "\r* Processed read ends: %llu", (read_end1 + read_end2));
+        if (b->core.flag & BAM_FUNMAP)
+            continue;
+        if (b->core.flag & BAM_FPAIRED) {
+            if (b->core.flag & BAM_FREAD1){
+                read_end1_mapped++;
+            }else{
+                if (treat)
+                    read_end1_mapped++;
+                else
+                    read_end2_mapped++;
+            }
+        }else{
+            read_end1_mapped++;
+        }
+        //change chr name to chr1, chr2 ...
+        strcpy(chr, h->target_name[b->core.tid]);
+        if (addChr){
+            if (startsWith("GL", h->target_name[b->core.tid])) {
+                continue;
+            } else if (sameWord(h->target_name[b->core.tid], "MT")) {
+                strcpy(chr,"chrM");
+            } else if (!startsWith("chr", h->target_name[b->core.tid])) {
+                strcpy(chr, "chr");
+                strcat(chr, h->target_name[b->core.tid]);
+            }
+        }
+        //check Ref reads mapped to existed in chromosome size file or not
+        struct hashEl *he = hashLookup(nochr, chr);
+        if (he != NULL)
+            continue;
+        cend = (unsigned int) (hashIntValDefault(chrHash, chr, 2) - 1);
+        if (cend == 1){
+            hashAddInt(nochr, chr, 1);
+            warn("* Warning: read ends mapped to chromosome %s will be discarded as %s not existed in the chromosome size file", chr, chr);
+            continue;
+        }
+        if (b->core.flag & BAM_FPAIRED) {
+            if (b->core.flag & BAM_FREAD1){
+                read_end1_used++;
+            }else{
+                if (treat)
+                    read_end1_used++;
+                else
+                    read_end2_used++;
+            }
+        }else{
+            read_end1_used++;
+        }
+        //get mapping location for paired-end or single-end
+        if (treat){
+            reads_mapped++;
+            if (b->core.qual >= mapQ)
+                reads_mapped_unique++;
+            start = (unsigned int) b->core.pos;
+            int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + b->core.l_qseq;
+            end = min(cend, (unsigned int)tmpend);
+            strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
+            if (extension) {
+                if (strand == '+'){
+                    end = min(start + extension, cend);
+                }else{
+                    if (end < extension)
+                        start = 0;
+                    else
+                        start = end - extension;
+                    //start = max(end - extension, 0);
+                }
+            }
+
+        }else{
+        if (b->core.flag & BAM_FPAIRED) {
+            if (!(b->core.flag & BAM_FMUNMAP)){
+                if (b->core.flag & BAM_FREAD1){
+                    if (abs(b->core.isize) > iSize || b->core.isize == 0){
+                        continue;
+                    }else{
+                        reads_mapped++;
+                        if (b->core.qual >= mapQ)
+                            reads_mapped_unique++;
+                        if (b->core.isize > 0){
+                            start = (unsigned int) b->core.pos;
+                            strand = '+';
+                            int tmpend = start + b->core.isize;
+                            end = min(cend, (unsigned int)tmpend);
+                        }else{
+                            start = (unsigned int) b->core.pos;
+                            strand = '-';
+                            int tmpend = start - b->core.isize;
+                            end = min(cend, (unsigned int)tmpend);
+                        }
+                
+                    }
+                }else{
+                    continue;
+                }
+            }else{
+                if (discardWrongEnd){
+                    continue;
+                }else{
+                    reads_mapped++;
+                    if (b->core.qual >= mapQ)
+                        reads_mapped_unique++;
+                    start = (unsigned int) b->core.pos;
+                    int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + b->core.l_qseq;
+                    end = min(cend, (unsigned int)tmpend);
+                    strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
+                    if (extension) {
+                        if (strand == '+'){
+                            end = min(start + extension, cend);
+                        }else{
+                            if (end < extension)
+                                start = 0;
+                            else
+                                start = end - extension;
+                            //start = max(end - extension, 0);
+                        }
+                    }
+                }
+            }
+        }else{
+            reads_mapped++;
+            if (b->core.qual >= mapQ)
+                reads_mapped_unique++;
+            start = (unsigned int) b->core.pos;
+            int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + b->core.l_qseq;
+            end = min(cend, (unsigned int)tmpend);
+            strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
+            if (extension) {
+                if (strand == '+'){
+                    end = min(start + extension, cend);
+                }else{
+                    if (end < extension)
+                        start = 0;
+                    else
+                        start = end - extension;
+                }
+            }
+        }
+    }
+        //remove dup or not
+        if (rmDup){
+            if (sprintf(key, "%s:%u:%u:%c", chr, start, end, strand) < 0)
+                errAbort("Mem ERROR");
+            struct hashEl *hel = hashLookup(dup, key);
+            if (hel == NULL) {
+                hashAddInt(dup, key, 1);
+            } else {
+                continue;
+            }
+        }
+        reads_nonredundant++;
+        if (b->core.qual >= mapQ)
+            reads_nonredundant_unique++;
+        //output bed
+        int i, qlen = b->core.l_qseq;
+        if(b->core.qual >= mapQ){
+            fprintf(outbed_f, "%s\t%u\t%u\t", chr, start, end);
+            //print read sequence
+            if (max_buf < qlen + 1 ) {
+                max_buf = qlen + 1;
+                kroundup32(max_buf);
+                buf = realloc(buf, max_buf);
+            }
+            buf[qlen] = 0;
+            seq = bam1_seq(b);
+            for (i = 0; i < qlen; ++i)
+                buf[i] = bam1_seqi(seq, i);
+            if (b->core.flag & 16) {
+                for (i = 0; i < qlen>>1; ++i){
+                    int8_t t = seq_comp_table[buf[qlen - 1 - i]];
+                    buf[qlen - 1 - i] = seq_comp_table[buf[i]];
+                    buf[i] = t;
+                }
+                if (qlen&1) buf[i] = seq_comp_table[buf[i]];
+            }
+            for (i = 0; i < qlen; ++i)
+                buf[i] = bam_nt16_rev_table[buf[i]];
+            fprintf(outbed_f, "%s", (char*)buf);
+
+            fprintf(outbed_f, "\t%i\t%c\n", b->core.qual, strand);
+            //do cpg stat
+            struct hashEl *hel5 = hashLookup(cpgHash, chr);
+            if (hel5 == NULL)
+                continue;
+            struct binKeeper *bs5 = (struct binKeeper *) hel5->val;
+            int c = binKeeperCpGstat(bs5, start, end);
+            slAddHead(&countcpg, slIntNew(c));
+        }
+    }
+    fprintf(stderr, "\r* Processed read ends: %llu\n", (read_end1 + read_end2));
+    slReverse(&countcpg);
+    *cpgCount = countcpg;
+    samclose(samfp);
+    free(buf);
+    bam_destroy1(b);
+    freeHash(&nochr);
+    freeHash(&dup);
+    carefulClose(&outbed_f);
+    cnt[0] = read_end1;
+    cnt[1] = read_end2;
+    cnt[2] = read_end1_mapped;
+    cnt[3] = read_end2_mapped;
+    cnt[4] = read_end1_used;
+    cnt[5] = read_end2_used;
+    cnt[6] = reads_mapped;
+    cnt[7] = reads_mapped_unique;
+    cnt[8] = reads_nonredundant;
+    cnt[9] = reads_nonredundant_unique;
+    return cnt;
+}
+
 unsigned long long int *PEsamFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, unsigned int iSize) {
     samfile_t *samfp;
     char chr[100], prn[500], key[100], strand;
@@ -1315,6 +1671,37 @@ struct hash *MREfrag2Hash (char *fragfile, int minlen, int maxlen){
         }
     }
     lineFileClose(&frag_stream);
+    return hash;
+}
+
+struct hash *cpgBed2BinKeeperHash (struct hash *chrHash, char *cpgbedfile){
+    struct hash *hash = newHash(0);
+    char *row[20], *line;
+    int start, end;
+    struct lineFile *stream = lineFileOpen(cpgbedfile, TRUE);
+    while ( lineFileNextReal(stream, &line)){
+        int numFields = chopByWhite(line, row, ArraySize(row));
+        if (numFields < 4)
+            errAbort("file %s doesn't appear to be in bed format. At least 3 fields required, got %d", cpgbedfile, numFields);
+        start = (int) strtol(row[1], NULL, 0);
+        end = (int) strtol(row[2], NULL, 0);
+        struct cpgC *c = malloc(sizeof(struct cpgC));
+        c->c = 0;
+        struct hashEl *hel = hashLookup(hash, row[0]);
+        if (hel != NULL) {
+            struct binKeeper *bk = (struct binKeeper *) hel->val;
+            binKeeperAdd(bk, start, end, c); // c stores cpg coverage count
+        } else {
+            int size = hashIntValDefault(chrHash, row[0], 0);
+            if (size == 0) {
+                continue;
+            }
+            struct binKeeper *bk = binKeeperNew(0, size);
+            binKeeperAdd(bk, start, end, c);
+            hashAdd(hash, row[0], bk);
+        }
+    }
+    lineFileClose(&stream);
     return hash;
 }
 
