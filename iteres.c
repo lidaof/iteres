@@ -1,6 +1,6 @@
 #include "generic.h"
 
-#define ITERES_VERSION "0.2.9-r106"
+#define ITERES_VERSION "0.3.0-r107"
 
 static int usage() {
     fprintf(stderr, "\n");
@@ -14,6 +14,7 @@ static int usage() {
     fprintf(stderr, "         cpg         generate CpG density for MREseq data\n");
     fprintf(stderr, "         cpgstat     generate CpG density from MREseq data for repeats\n");
     fprintf(stderr, "         cpgfilter   filter CpG statistic on repName/repFamily/repClass\n");
+    fprintf(stderr, "         genomecov   calculate genome coverage by reads using sorted bedGraph file\n");
     fprintf(stderr, "\n");
     return 1;
 }
@@ -27,6 +28,7 @@ int main(int argc, char *argv[]) {
     else if (strcmp(argv[1], "cpg") == 0) return main_cpg(argc-1, argv+1);
     else if (strcmp(argv[1], "cpgstat") == 0) return main_cpgstat(argc-1, argv+1);
     else if (strcmp(argv[1], "cpgfilter") == 0) return main_cpgfilter(argc-1, argv+1);
+    else if (strcmp(argv[1], "genomecov") == 0) return main_genomecov(argc-1, argv+1);
     else {
         fprintf(stderr, "[iteres] unrecognized command '%s'\n", argv[1]);
         return 1;

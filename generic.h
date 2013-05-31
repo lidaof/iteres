@@ -67,6 +67,11 @@ struct cpgC {
     int c;
 };
 
+struct gcov {
+    int total;
+    int cov;
+};
+
 int stat_usage();
 int main_stat(int argc, char *argv[]);
 int filter_usage();
@@ -81,13 +86,17 @@ int cpgstat_usage();
 int main_cpgstat(int argc, char *argv[]);
 int cpgfilter_usage();
 int main_cpgfilter (int argc, char *argv[]);
+int genomecov_usage();
+int main_genomecov(int argc, char *argv[]);
 
 
 char *get_filename_without_ext(char *filename);
 char *get_filename_ext(char *filename);
+bool is_file(const char* path); 
+bool is_dir(const char* path);
 double cal_rpkm (unsigned long long int reads_count, unsigned long long int total_length, unsigned long long int mapped_reads_num);
 double cal_rpm (unsigned long long int reads_count, unsigned long long int mapped_reads_num);
-
+struct lineFile *lineFileOpen2(char *fileName, bool zTerm);
 void writeReport(char *outfile, unsigned long long int *cnt, unsigned int mapQ, char *subfam);
 void writeWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash2, char *of1, char *of2, char *of3, char *of4, char *of5, unsigned long long int reads_num, unsigned long int reads_num_unique);
 unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr);
@@ -113,5 +122,9 @@ boolean binKeeperAnyInclude(struct binKeeper *bk, int start, int end);
 int binKeeperCpGstat(struct binKeeper *bk, int start, int end);
 void writecpgCount(struct slInt *cpgCount, char *outfile);
 void writecpgCov(struct hash *cpgHash, char *outfile);
+void writeInsertsize(struct slInt *slPair, char *outfile);
 struct hash *cpgBed2BinKeeperHash (struct hash *chrHash, char *cpgbedfile);
-unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct hash *chrHash, struct hash *cpgHash, struct slInt **cpgCount, int isSam, unsigned int mapQ, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, int treat);
+unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct hash *chrHash, struct hash *cpgHash, struct slInt **cpgCount, struct slInt **slPair, int isSam, unsigned int mapQ, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, int treat);
+struct hash *initGenomeCovHash(struct hash *chrHash);
+void writeGenomeCov(struct hash *cov, char *outfile);
+struct hash *calGenomeCovBedGraph(char *chrsize, char *bedgraph);

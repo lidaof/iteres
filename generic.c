@@ -26,12 +26,34 @@ char *get_filename_ext(char *filename) {
     return dot + 1;
 }
 
+bool is_file(const char* path) {
+    struct stat buf;
+    stat(path, &buf);
+    return S_ISREG(buf.st_mode);
+}
+
+bool is_dir(const char* path) {
+    struct stat buf;
+    stat(path, &buf);
+    return S_ISDIR(buf.st_mode);
+}
+
 double cal_rpkm (unsigned long long int reads_count, unsigned long long int total_length, unsigned long long int mapped_reads_num) {
     return reads_count / (mapped_reads_num * 1e-9 * total_length);
 }
 
 double cal_rpm (unsigned long long int reads_count, unsigned long long int mapped_reads_num) {
     return reads_count / (mapped_reads_num * 1e-6 );
+}
+
+struct lineFile *lineFileOpen2(char *fileName, bool zTerm){
+/* Open up a lineFile or die trying. */
+if (is_dir(fileName))
+    errAbort("Error: %s is a directory not a file", fileName);
+struct lineFile *lf = lineFileMayOpen(fileName, zTerm);
+if (lf == NULL)
+    errAbort("Couldn't open %s , %s", fileName, strerror(errno));
+return lf;
 }
 
 boolean binKeeperAnyInclude(struct binKeeper *bk, int start, int end){
@@ -130,6 +152,15 @@ void writeReportDensity(char *outfile, unsigned long long int *cnt, unsigned int
     carefulClose(&f);
 }
 
+void writeInsertsize(struct slInt *slPair, char *outfile){
+    struct slInt *c;
+    FILE *f = mustOpen(outfile, "w");
+    for ( c = slPair; c != NULL; c = c->next){
+        fprintf(f, "%d\n", c->val);
+    }
+    carefulClose(&f);
+}
+
 void writecpgCount(struct slInt *cpgCount, char *outfile){
     struct slInt *c;
     //fprintf(stderr, "%d elements in cpgCount", slCount(cpgCount));
@@ -153,6 +184,17 @@ void writecpgCov(struct hash *cpgHash, char *outfile){
             fprintf(f, "%i\n", oc->c);
         }
         binKeeperFree(&bk);
+    }
+    carefulClose(&f);
+}
+
+void writeGenomeCov(struct hash *cov, char *outfile){
+    struct hashEl *hel;
+    struct hashCookie cookie = hashFirst(cov);
+    FILE *f = mustOpen(outfile, "w");
+    while ( (hel = hashNext(&cookie)) != NULL ) {
+        struct gcov *g = (struct gcov *) hel->val;
+        fprintf(f, "%s\t%i\t%i\n", hel->name, g->total, g->cov);
     }
     carefulClose(&f);
 }
@@ -720,7 +762,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
 }
 
 void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int filter) {
-    struct lineFile *infileStream = lineFileOpen(cpgBedGraphFile, TRUE);
+    struct lineFile *infileStream = lineFileOpen2(cpgBedGraphFile, TRUE);
     char *row[20], *line;
     unsigned int start, end, rstart, rend, cpgInRepeat = 0, cpglines = 0;
     double score = 0;
@@ -1047,10 +1089,11 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
     return cnt;
 }
 
-unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct hash *chrHash, struct hash *cpgHash, struct slInt **cpgCount, int isSam, unsigned int mapQ, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, int treat) {
+unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct hash *chrHash, struct hash *cpgHash, struct slInt **cpgCount, struct slInt **slPair, int isSam, unsigned int mapQ, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, int treat) {
     samfile_t *samfp;
     FILE *outbed_f = mustOpen(outbed, "w");
     struct slInt *countcpg = NULL;
+    struct slInt *pairsl = NULL;
     char chr[100], key[100], strand;
     unsigned int start, end, cend;
     unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 10);
@@ -1277,6 +1320,8 @@ unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct h
             fprintf(outbed_f, "%s", (char*)buf);
 
             fprintf(outbed_f, "\t%i\t%c\n", b->core.qual, strand);
+            //output insert size
+            slAddHead(&pairsl, slIntNew(end-start));
             //do cpg stat
             struct hashEl *hel5 = hashLookup(cpgHash, chr);
             if (hel5 == NULL)
@@ -1289,6 +1334,18 @@ unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct h
     fprintf(stderr, "\r* Processed read ends: %llu\n", (read_end1 + read_end2));
     slReverse(&countcpg);
     *cpgCount = countcpg;
+    if (read_end1 == read_end2) { //paired-end
+        fprintf(stderr, "* Paired end data\n");
+        slReverse(&pairsl);
+        *slPair = pairsl;
+        //fprintf(stderr, "* %d elements\n", slCount(slPair));
+    }else{
+        if (read_end2 == 0){
+            fprintf(stderr, "* Single end data\n");
+        } else {
+            fprintf(stderr, "* Mixed of single & paired end data\n");
+        }
+    }
     samclose(samfp);
     free(buf);
     bam_destroy1(b);
@@ -1306,6 +1363,23 @@ unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct h
     cnt[8] = reads_nonredundant;
     cnt[9] = reads_nonredundant_unique;
     return cnt;
+}
+
+struct hash *initGenomeCovHash(struct hash *chrHash){
+    struct hash *hash = newHash(0);
+    struct hashEl *hel;
+    int i;
+    struct hashCookie cookie = hashFirst(chrHash);
+    while((hel = hashNext(&cookie)) != NULL) {
+        struct slInt *sl = NULL;
+        int s = ptToInt(hel->val);
+        for (i=0; i < s; i++){
+            slAddHead(&sl, slIntNew(0));
+        }
+        slReverse(&sl);
+        hashAdd(hash, hel->name, sl);
+    }
+    return hash;
 }
 
 unsigned long long int *PEsamFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, unsigned int iSize) {
@@ -1497,7 +1571,7 @@ void freermsk(struct rmsk *s){
 void rmsk2binKeeperHash(char *rmskfile, struct hash *chrHash, struct hash *repHash, struct hash **hashRmsk, struct hash **hashRep, struct hash **hashFam, struct hash **hashCla, int filterField, char *filterName){
     char strand;
     char *row[17];
-    struct lineFile *repeat_stream = lineFileOpen(rmskfile, TRUE);
+    struct lineFile *repeat_stream = lineFileOpen2(rmskfile, TRUE);
     int repeat_num = 0;
     struct hash *hash1 = newHash(0); //hashRmsk
     struct hash *hash2 = newHash(0); //hashRep
@@ -1630,7 +1704,7 @@ struct hash *MREfrag2Hash (char *fragfile, int minlen, int maxlen){
     char *row[20], *line;
     int start, end, length, rstart, rend;
     char key1[100], key2[100];
-    struct lineFile *frag_stream = lineFileOpen(fragfile, TRUE);
+    struct lineFile *frag_stream = lineFileOpen2(fragfile, TRUE);
     while ( lineFileNextReal(frag_stream, &line)){
         int numFields = chopByWhite(line, row, ArraySize(row));
         if (numFields < 4)
@@ -1678,7 +1752,7 @@ struct hash *cpgBed2BinKeeperHash (struct hash *chrHash, char *cpgbedfile){
     struct hash *hash = newHash(0);
     char *row[20], *line;
     int start, end;
-    struct lineFile *stream = lineFileOpen(cpgbedfile, TRUE);
+    struct lineFile *stream = lineFileOpen2(cpgbedfile, TRUE);
     while ( lineFileNextReal(stream, &line)){
         int numFields = chopByWhite(line, row, ArraySize(row));
         if (numFields < 4)
@@ -1734,7 +1808,7 @@ unsigned long long int *filterReadByMREsite(struct hash *hash, char *inBed, char
         FILE *f6 = mustOpen(out6, "w");
     //}
     char strand, *row[20], *line;
-    struct lineFile *inBedStream = lineFileOpen(inBed, TRUE);
+    struct lineFile *inBedStream = lineFileOpen2(inBed, TRUE);
     char key1[100]; //key2[100];
     int start, end, rstart, rend;
     unsigned long long int CCGG = 0, CCGC = 0, GCGC = 0, ACGT = 0, CGCG = 0, unknown = 0;
@@ -2108,7 +2182,7 @@ void sortBedfile(char *bedfile) {
     char *line;
     int lineSize;
 
-    lf = lineFileOpen(bedfile, TRUE);
+    lf = lineFileOpen2(bedfile, TRUE);
     while (lineFileNext(lf, &line, &lineSize)){
         if (line[0] == '#')
             continue;
@@ -2129,4 +2203,48 @@ void sortBedfile(char *bedfile) {
     }
     carefulClose(&f);
     bedLineFreeList(&blList);
+}
+
+struct hash *calGenomeCovBedGraph(char *chrsize, char *bedgraph){
+    struct hash *hash = hashNameIntFile(chrsize);
+    struct hash *cov = newHash(0);
+    struct hashEl *hel;
+    struct hashCookie cookie = hashFirst(hash);
+    while((hel = hashNext(&cookie)) != NULL) {
+        struct gcov *g = malloc(sizeof(struct gcov));
+        g->total = ptToInt(hel->val);
+        g->cov = 0;
+        hashAdd(cov, hel->name, g);
+    }
+    char *row[20], *line, prechr[100] = "start";
+    int start, end, size, cnt = 0;
+    struct lineFile *stream = lineFileOpen2(bedgraph, TRUE);
+    while ( lineFileNextReal(stream, &line)){
+        int numFields = chopByWhite(line, row, ArraySize(row));
+        if (numFields < 4)
+            errAbort("file %s doesn't appear to be in bedGraph format. At least 4 fields required, got %d", bedgraph, numFields);
+        start = (int) strtol(row[1], NULL, 0);
+        end = (int) strtol(row[2], NULL, 0);
+        size = end - start;
+        if ( !sameWord(row[0], prechr)){
+            //a new chromosome starts
+            struct hashEl *hel2 = hashLookup(cov, prechr);
+            if (hel2 != NULL) {
+                struct gcov *g = (struct gcov *) hel2->val;
+                g->cov = cnt;
+            }
+            cnt = size;
+        }else{
+            cnt += size;
+        }
+        strcpy(prechr, row[0]);
+    }
+    //last chromosome
+    struct hashEl *hel2 = hashLookup(cov, prechr);
+    if (hel2 != NULL) {
+        struct gcov *g = (struct gcov *) hel2->val;
+        g->cov = cnt;
+    }
+    lineFileClose(&stream);
+    return cov;
 }

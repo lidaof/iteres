@@ -698,7 +698,7 @@ int density_usage(){
 /* main function */
 int main_density (int argc, char *argv[]) {
     
-    char *output, *outReportfile, *outExtfile, *outbedGraphfile, *outbigWigfile, *outCountfile, *outCovfile;
+    char *output, *outReportfile, *outExtfile, *outbedGraphfile, *outbigWigfile, *outCountfile, *outCovfile, *outInsertfile, *outGenomeCov;
     unsigned long long int *cnt;
     int optSam = 0, c, optDup = 1, optaddChr = 0, optDis = 1, optTreat = 0;
     unsigned int optQual = 10, optExt = 150, optisize = 500;
@@ -706,6 +706,7 @@ int main_density (int argc, char *argv[]) {
     time_t start_time, end_time;
     start_time = time(NULL);
     struct slInt *cpgCount = NULL;
+    struct slInt *slPair = NULL;
     
     while ((c = getopt(argc, argv, "SQ:rTm:DCo:E:I:h?")) >= 0) {
         switch (c) {
@@ -729,7 +730,8 @@ int main_density (int argc, char *argv[]) {
 
     char *chr_size_file = argv[optind];
     char *sam_file = argv[optind+1];
-    
+   
+    //struct hash *genome = newHash(0);
     struct hash *hash = hashNameIntFile(chr_size_file);
     struct hash *cpgHash = newHash(0);
     if (optm != NULL){
@@ -757,13 +759,21 @@ int main_density (int argc, char *argv[]) {
         errAbort("Preparing output wrong");
     if (asprintf(&outCovfile, "%s.cpgCoverage", output) < 0)
         errAbort("Preparing output wrong");
+    if (asprintf(&outInsertfile, "%s.insertdistro", output) < 0)
+        errAbort("Preparing output wrong");
+    if (asprintf(&outGenomeCov, "%s.genomeCoverage", output) < 0)
+        errAbort("Preparing output wrong");
     
+    //initilize genome coverage hash
+    //genome = initGenomeCovHash(hash);
+    //exit(1);
+
     //sam file to bed file
     fprintf(stderr, "* Parsing the SAM/BAM file\n");
     if (optm == NULL){
         cnt = sam2bed(sam_file, outExtfile, hash, optSam, optQual, optDup, optaddChr, optDis, optisize, optExt, optTreat);
     }else{
-        cnt = sam2bedwithCpGstat(sam_file, outExtfile, hash, cpgHash, &cpgCount, optSam, optQual, optDup, optaddChr, optDis, optisize, optExt, optTreat);
+        cnt = sam2bedwithCpGstat(sam_file, outExtfile, hash, cpgHash, &cpgCount, &slPair, optSam, optQual, optDup, optaddChr, optDis, optisize, optExt, optTreat);
     }
     //sort
     //fprintf(stderr, "\n* Sorting\n");
@@ -785,6 +795,10 @@ int main_density (int argc, char *argv[]) {
     //    bedSortFile(outExtfile, outExtfile);
     //}
 
+    if(slPair != NULL){
+        writeInsertsize(slPair, outInsertfile);
+    }
+
     if (optm != NULL){
         fprintf(stderr, "* Generating CpG stats\n");
         writecpgCount(cpgCount, outCountfile);
@@ -792,6 +806,7 @@ int main_density (int argc, char *argv[]) {
         hashFree(&cpgHash);
         slFreeList(&cpgCount);
     }
+    
     //exit(1);
     
     //sort extend bed
@@ -807,6 +822,10 @@ int main_density (int argc, char *argv[]) {
     //bigWigFileCreate(outbedGraphfile, chr_size_file, 256, 1024, 0, 1, outbigWigfile);
     bedGraphToBigWig(outbedGraphfile, chr_size_file, outbigWigfile);
 
+    fprintf(stderr, "* Calculating genome coverage\n");
+    struct hash *covhash = calGenomeCovBedGraph(chr_size_file, outbedGraphfile);
+    writeGenomeCov(covhash, outGenomeCov);
+    
     //write report file
     fprintf(stderr, "* Preparing report file\n");
     writeReportDensity(outReportfile, cnt, optQual);

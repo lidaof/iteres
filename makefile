@@ -6,7 +6,7 @@ MYLIBS =  ${MYLIBDIR}/jkhgap.a ${MYLIBDIR}/jkweb.a
 
 MYF = iteres
 
-O = generic.o stat.o filter.o nearby.o density.o cpg.o cpgstat.o cpgfilter.o $(MYF).o
+O = generic.o stat.o filter.o nearby.o density.o cpg.o cpgstat.o cpgfilter.o genomecov.o $(MYF).o
 
 all: ${O} $(MYLIBS)
 	${CC} ${COPT} -o $(MYF) $O ${MYLIBS} $L
