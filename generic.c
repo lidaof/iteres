@@ -8,6 +8,9 @@ static int binOffsetsExtended[] =
 #define _binFirstShift 17	/* How much to shift to get to finest bin. */
 #define _binNextShift 3		/* How much to shift to get to next larger bin. */
 
+char template_name[]="/tmp/iteresXXXXXX";
+char *cpglabel[19] = {"0","1","2","3","4","5","6","7","8","9","10","11-20","21-30","31-40","41-50","51-100","101-200","201-300","\\textgreater 300"};
+
 /* definitions of functions */
 
 char *get_filename_without_ext(char *filename) {
@@ -24,6 +27,10 @@ char *get_filename_ext(char *filename) {
     char *dot = strrchr(filename, '.');
     if(!dot || dot == filename) return "";
     return dot + 1;
+}
+
+char * texTitleEscape(char *title){
+    return replaceChars(title, "_", "\\_");
 }
 
 bool is_file(const char* path) {
@@ -152,13 +159,45 @@ void writeReportDensity(char *outfile, unsigned long long int *cnt, unsigned int
     carefulClose(&f);
 }
 
-void writeInsertsize(struct slInt *slPair, char *outfile){
+long long writeInsertsize(struct slInt *slPair, char *outfile){
     struct slInt *c;
+    long long sum = 0;
     FILE *f = mustOpen(outfile, "w");
     for ( c = slPair; c != NULL; c = c->next){
         fprintf(f, "%d\n", c->val);
+        sum += (long long) c->val;
     }
     carefulClose(&f);
+    return sum;
+}
+
+long long plotInsertsize(struct slInt *slPair, char *prefix){
+    long long sum = 0;
+    char tmpRfile[50], tmpifile[50];
+    strcpy(tmpRfile, template_name);
+    strcpy(tmpifile, template_name);
+    int fd = mkstemp(tmpRfile);
+    if (fd == -1)
+        errAbort("create temp file error.");
+    int fd2 = mkstemp(tmpifile);
+    if (fd2 == -1)
+        errAbort("create temp file error.");
+    sum = writeInsertsize(slPair, tmpifile);
+    FILE *fout = fdopen(fd, "w");
+    fprintf(fout, "dat <- read.table(\"%s\")\n", tmpifile);
+    fprintf(fout, "pdf('%s.insertdistro.pdf')\n", prefix);
+    fprintf(fout, "d <- density(dat$V1)\n");
+    fprintf(fout, "plot(d, main=\"Fragments Size Distribution\")\n");
+    fprintf(fout, "polygon(d, col=\"red\", border=\"blue\")\n");
+    fprintf(fout, "dev.off()\n");
+    fclose(fout);
+
+    char *command;
+    asprintf(&command, "Rscript %s", tmpRfile);
+    if(system(command) == -1)
+        fprintf(stderr, "failed to call R for plotting");
+    unlink(tmpifile);
+    return sum;
 }
 
 void writecpgCount(struct slInt *cpgCount, char *outfile){
@@ -169,6 +208,130 @@ void writecpgCount(struct slInt *cpgCount, char *outfile){
         fprintf(f, "%d\n", c->val);
     }
     carefulClose(&f);
+}
+
+long long * plotcpgCount(struct slInt *Count, char *prefix){
+    long long *cnt = malloc(sizeof(long long)*20);
+    struct slInt *c;
+    long long sum = 0;
+    int i, j;
+    for(i=0;i<20;i++)
+        cnt[i] = 0;
+    for ( c = Count; c != NULL; c = c->next){
+        j = c->val;
+        sum += j;
+        if (j == 0) cnt[0] ++;
+        else if (j == 1) cnt[1]++;
+        else if (j == 2) cnt[2]++;
+        else if (j == 3) cnt[3]++;
+        else if (j == 4) cnt[4]++;
+        else if (j == 5) cnt[5]++;
+        else if (j == 6) cnt[6]++;
+        else if (j == 7) cnt[7]++;
+        else if (j == 8) cnt[8]++;
+        else if (j == 9) cnt[9]++;
+        else if (j == 10) cnt[10]++;
+        else if (j >=11 && j <= 20) cnt[11]++;
+        else if (j >=21 && j <= 30) cnt[12]++;
+        else if (j >=31 && j <= 40) cnt[13]++;
+        else if (j >=41 && j <= 50) cnt[14]++;
+        else if (j >=51 && j <= 100) cnt[15]++;
+        else if (j >=101 && j <= 200) cnt[16]++;
+        else if (j >=201 && j <= 300) cnt[17]++;
+        else cnt[18]++; // j >=301
+    }
+    cnt[19] = sum;
+
+    char tmpRfile[50];
+    strcpy(tmpRfile, template_name);
+    int fd = mkstemp(tmpRfile);
+    if (fd == -1)
+        errAbort("create temp file error.");
+    FILE *fout = fdopen(fd, "w");
+    fprintf(fout, "dat<-data.frame(label=c('0','1','2','3','4','5','6','7','8','9','10','11-20','21-30','31-40','41-50','51-100','101-200','201-300','>300'), \nvalue=c(");
+    for(i=0;i<19;i++){
+        fprintf(fout,"%lli", cnt[i]);
+        if (i<18) fprintf(fout, ",");
+    }
+    fprintf(fout, "))\n");
+    fprintf(fout, "dat <- subset(dat, value!=0)\n");
+    fprintf(fout, "pdf('%s.cpgCount.pdf')\n", prefix);
+    fprintf(fout, "op <- par(mar = c(5,7,4,2) + 0.1)\n");
+    fprintf(fout, "barplot(rev(dat$value), names=rev(dat$label), main=\"CpG Count\", xlab=\"Number of Fragments\", ylab=\"\", col=4, las=1, horiz=TRUE)\n");
+    fprintf(fout, "title(ylab = \"CpG Count in Fragments\", cex.lab = 1.5, line = 4.5)\n");
+    fprintf(fout, "par(op)\n");
+    fprintf(fout, "dev.off()\n");
+    fclose(fout);
+
+    char *command;
+    asprintf(&command, "Rscript %s", tmpRfile);
+    if(system(command) == -1)
+        fprintf(stderr, "failed to call R for plotting");
+    return cnt;
+}
+
+int * plotcpgCov(struct hash *cpgHash, char *prefix){
+    struct hashEl *hel;
+    int *cnt = malloc(sizeof(int)*19);
+    int i, j;
+    for(i=0;i<19;i++)
+        cnt[i] = 0;
+    struct hashCookie cookie = hashFirst(cpgHash);
+    while ( (hel = hashNext(&cookie)) != NULL ) {
+        struct binKeeper *bk = (struct binKeeper *) hel->val;
+        struct binKeeperCookie becookie = binKeeperFirst(bk);
+        struct binElement *be;
+        while( (be = binKeeperNext(&becookie)) != NULL ){
+            struct cpgC *oc = (struct cpgC *) be->val;
+            j = oc->c;
+            if (j == 0) cnt[0] ++;
+            else if (j == 1) cnt[1]++;
+            else if (j == 2) cnt[2]++;
+            else if (j == 3) cnt[3]++;
+            else if (j == 4) cnt[4]++;
+            else if (j == 5) cnt[5]++;
+            else if (j == 6) cnt[6]++;
+            else if (j == 7) cnt[7]++;
+            else if (j == 8) cnt[8]++;
+            else if (j == 9) cnt[9]++;
+            else if (j == 10) cnt[10]++;
+            else if (j >=11 && j <= 20) cnt[11]++;
+            else if (j >=21 && j <= 30) cnt[12]++;
+            else if (j >=31 && j <= 40) cnt[13]++;
+            else if (j >=41 && j <= 50) cnt[14]++;
+            else if (j >=51 && j <= 100) cnt[15]++;
+            else if (j >=101 && j <= 200) cnt[16]++;
+            else if (j >=201 && j <= 300) cnt[17]++;
+            else cnt[18]++; // j >=301
+        }
+        binKeeperFree(&bk);
+    }
+    char tmpRfile[50];
+    strcpy(tmpRfile, template_name);
+    int fd = mkstemp(tmpRfile);
+    if (fd == -1)
+        errAbort("create temp file error.");
+    FILE *fout = fdopen(fd, "w");
+    fprintf(fout, "dat<-data.frame(label=c('0','1','2','3','4','5','6','7','8','9','10','11-20','21-30','31-40','41-50','51-100','101-200','201-300','>300'), \nvalue=c(");
+    for(i=0;i<19;i++){
+        fprintf(fout,"%i", cnt[i]);
+        if (i<18) fprintf(fout, ",");
+    }
+    fprintf(fout, "))\n");
+    fprintf(fout, "dat <- subset(dat, value!=0)\n");
+    fprintf(fout, "pdf('%s.cpgCoverage.pdf')\n", prefix);
+    fprintf(fout, "op <- par(mar = c(5,7,4,2) + 0.1)\n");
+    fprintf(fout, "barplot(rev(dat$value), names=rev(dat$label), main=\"CpG Coverage\", xlab=\"Number of CpG\", ylab=\"\", col=3, las=1, horiz=TRUE)\n");
+    fprintf(fout, "title(ylab = \"Times Covered\", cex.lab = 1.5, line = 4.5)\n");
+    fprintf(fout, "par(op)\n");
+    fprintf(fout, "dev.off()\n");
+    fclose(fout);
+
+    char *command;
+    asprintf(&command, "Rscript %s", tmpRfile);
+    if(system(command) == -1)
+        fprintf(stderr, "failed to call R for plotting");
+    return cnt;
 }
 
 void writecpgCov(struct hash *cpgHash, char *outfile){
@@ -197,6 +360,63 @@ void writeGenomeCov(struct hash *cov, char *outfile){
         fprintf(f, "%s\t%i\t%i\n", hel->name, g->total, g->cov);
     }
     carefulClose(&f);
+}
+
+void plotGenomeCov(struct hash *cov, char *prefix){
+    struct hashEl *hel;
+    struct hashCookie cookie = hashFirst(cov);
+    int i = 1;
+    int tot = hashNumEntries(cov);
+    char tmpRfile[50];
+    strcpy(tmpRfile, template_name);
+    int fd = mkstemp(tmpRfile);
+    if (fd == -1)
+        errAbort("create temp file error.");
+    FILE *fout = fdopen(fd, "w");
+    fprintf(fout, "dat <- data.frame(label=rep(NA, %d), total=rep(0, %d), cov=rep(0, %d), stringsAsFactors=FALSE)\n", tot, tot, tot);
+    while ( (hel = hashNext(&cookie)) != NULL ) {
+        struct gcov *g = (struct gcov *) hel->val;
+        fprintf(fout, "dat[%d, ] <- c('%s', %i, %i)\n", i, hel->name, g->total, g->cov);
+        i++;
+    }
+    fprintf(fout, "dat$total <- as.numeric(dat$total)\n");
+    fprintf(fout, "dat$cov <- as.numeric(dat$cov)\n");
+    fprintf(fout, "pdf('%s.genomeCov.pdf')\n", prefix);
+    fprintf(fout, "op <- par(mar = c(5,7,4,2) + 0.1)\n");
+    fprintf(fout, "barplot(rev(dat$cov/dat$total), names=rev(dat$label), main=\"Genome Coverage\", xlab=\"Coverage Percentage\", ylab=\"\", col=5, las=1, horiz=TRUE, xlim=c(0,1))\n");
+    fprintf(fout, "title(ylab = \"Chromosomes\", cex.lab = 1.5, line = 4.5)\n");
+    fprintf(fout, "par(op)\n");
+    fprintf(fout, "dev.off()\n");
+    fclose(fout);
+
+    char *command;
+    asprintf(&command, "Rscript %s", tmpRfile);
+    if(system(command) == -1)
+        fprintf(stderr, "failed to call R for plotting");
+}
+
+void plotMappingStat(unsigned long long int *cnt, char *prefix){
+    char tmpRfile[50];
+    strcpy(tmpRfile, template_name);
+    int fd = mkstemp(tmpRfile);
+    if (fd == -1)
+        errAbort("create temp file error.");
+    FILE *fout = fdopen(fd, "w");
+    fprintf(fout, "dat <- data.frame(count=c(%llu, %llu, %llu, %llu), label=c('total\\nfragments','mapped\\nfragments','uniquely\\nmapped\\nfragments', 'non-redundant\\nuniquely\\nmapped\\nfragments'))\n", cnt[0], cnt[6], cnt[7], cnt[9]);
+    fprintf(fout, "dat$count <- as.numeric(dat$count)\n");
+    fprintf(fout, "pdf('%s.mappingStat.pdf')\n", prefix);
+    fprintf(fout, "op <- par(mar = c(7,8,4,2) + 0.1)\n");
+    fprintf(fout, "bar <- barplot(dat$count, las=1, col=2:5, ylab='',xlab='', main='Mapping stats')\n");
+    fprintf(fout, "title(ylab = 'Fragments count', cex.lab = 1.5, line = 4.5)\n");
+    fprintf(fout, "axis(1, at=bar, labels=dat$label, padj=1, tick=FALSE)\n");
+    fprintf(fout, "par(op)\n");
+    fprintf(fout, "dev.off()\n");
+    fclose(fout);
+
+    char *command;
+    asprintf(&command, "Rscript %s", tmpRfile);
+    if(system(command) == -1)
+        fprintf(stderr, "failed to call R for plotting");
 }
 
 void writeWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash2, char *of1, char *of2, char *of3, char *of4, char *of5, unsigned long long int reads_num, unsigned long int reads_num_unique){
@@ -2247,4 +2467,148 @@ struct hash *calGenomeCovBedGraph(char *chrsize, char *bedgraph){
     }
     lineFileClose(&stream);
     return cov;
+}
+
+void genMeDIPTex(char *prefix, unsigned long long int *cnt, long long fragbase, int *covCnt, long long *countCnt, struct slInt *slPair, struct hash *chrHash, struct hash *cov){
+    char *outfile;
+    if (asprintf(&outfile, "%s.tex", prefix) < 0)
+        errAbort("Preparing output wrong");
+    FILE *f = mustOpen(outfile, "w");
+    fprintf(f, "\\documentclass[12pt]{article}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\usepackage{fullpage}\n");
+    fprintf(f, "\\usepackage{amsfonts}\n");
+    fprintf(f, "\\usepackage{graphicx}\n");
+    fprintf(f, "\\usepackage{hyperref}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\begin{document}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\title{%s Report}\n", texTitleEscape(prefix));
+    fprintf(f, "\\author{iteres\\footnote{Website: \\url{http://epigenome.wustl.edu/iteres/}} \\ version\\ %s}\n", ITERES_VERSION);
+    fprintf(f, "\\date{\\today}\n");
+    fprintf(f, "\\maketitle\n");
+    fprintf(f, "\\pagenumbering{roman}\n");
+    fprintf(f, "\\tableofcontents\n");
+    fprintf(f, "\\clearpage\n");
+    fprintf(f, "\\setcounter{page}{1}\n");
+    fprintf(f, "\\pagenumbering{arabic}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\section{Mapping status}\n");
+    fprintf(f, "\\begin{center}\n");
+    fprintf(f, "\\begin{tabular}{|c|c|}\n");
+    fprintf(f, "\\hline\n");
+    fprintf(f, "total fragments & %llu \\\\ \\hline\n", cnt[0]);
+    fprintf(f, "mapped fragmentss & %llu \\\\ \\hline\n", cnt[6]);
+    fprintf(f, "uniquely mapped fragments & %llu \\\\ \\hline\n", cnt[7]);
+    fprintf(f, "non-redundant uniquely mapped fragments & %llu \\\\ \\hline\n", cnt[9]);
+    fprintf(f, "\\end{tabular}\n");
+    fprintf(f, "\\end{center}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\begin{center}\n");
+    fprintf(f, "\\includegraphics[width=6.5in]{{%s.mappingStat}.pdf}\n", prefix);
+    fprintf(f, "\\end{center}\n");
+    fprintf(f, "\n");
+    if(slPair != NULL){
+        fprintf(f, "\\section{Fragments size distribution}\n");
+        fprintf(f, "\\begin{center}\n");
+        fprintf(f, "\\includegraphics[width=6.5in]{{%s.insertdistro}.pdf}\n", prefix);
+        fprintf(f, "\\end{center}\n");
+        fprintf(f, "\n");
+    }
+    fprintf(f, "\\section{Genomic coverage}\n");
+    fprintf(f, "\\begin{center}\n");
+    fprintf(f, "\\begin{tabular}{|c|c|c|c|}\n");
+    fprintf(f, "\\hline\n");
+    fprintf(f, "chromosome & total base & covered base & covered percentage \\\\ \\hline\n");
+    //fprintf(f, "chr1 & 1111111 & 111111 & 0.79 \\\\ \\hline\n");
+    struct hashEl *hel;
+    long long t1 = 0, c1 = 0;
+    struct hashCookie cookie = hashFirst(cov);
+    while ( (hel = hashNext(&cookie)) != NULL ) {
+        struct gcov *g = (struct gcov *) hel->val;
+        fprintf(f, "%s & %i & %i & %.2f\\%% \\\\ \\hline\n", hel->name, g->total, g->cov, (((float)(g->cov))/(g->total)) * 100.0);
+        t1 += (long long)g->total;
+        c1 += (long long)g->cov;
+    }
+    fprintf(f, "%s & %lli & %lli & %.2f\\%% \\\\ \\hline\n", "Whole Genome", t1, c1, (((double)c1)/t1) * 100.0);
+    fprintf(f, "\\end{tabular}\n");
+    fprintf(f, "\\end{center}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\begin{center}\n");
+    fprintf(f, "\\includegraphics[width=6.5in]{{%s.genomeCov}.pdf}\n", prefix);
+    fprintf(f, "\\end{center}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\section{CpG status}\n");
+    fprintf(f, "\\subsection{CpG coverage}\n");
+    fprintf(f, "\\begin{center}\n");
+    fprintf(f, "\\begin{tabular}{|c|c|}\n");
+    fprintf(f, "\\hline\n");
+    fprintf(f, "Range & Count \\\\ \\hline\n");
+    //fprintf(f, "0 & 45455455 \\\\ \\hline\n");
+    int i;
+    for(i=0;i<19;i++){
+        if (covCnt[i] != 0)
+            fprintf(f, "%s & %i \\\\ \\hline\n", cpglabel[i], covCnt[i]);
+    }
+    fprintf(f, "\\end{tabular}\n");
+    fprintf(f, "\\end{center}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\begin{center}\n");
+    fprintf(f, "\\includegraphics[width=6.5in]{{%s.cpgCoverage}.pdf}\n", prefix);
+    fprintf(f, "\\end{center}\n");
+    fprintf(f, "\\subsection{CpG count}\n");
+    fprintf(f, "\\begin{center}\n");
+    fprintf(f, "\\begin{tabular}{|c|c|}\n");
+    fprintf(f, "\\hline\n");
+    fprintf(f, "Range & Count \\\\ \\hline\n");
+    //fprintf(f, "0 & 45455455 \\\\ \\hline\n");
+    for(i=0;i<19;i++){
+        if (countCnt[i] != 0)
+            fprintf(f, "%s & %lli \\\\ \\hline\n", cpglabel[i], countCnt[i]);
+    }
+    fprintf(f, "\\end{tabular}\n");
+    fprintf(f, "\\end{center}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\begin{center}\n");
+    fprintf(f, "\\includegraphics[width=6.5in]{{%s.cpgCount}.pdf}\n", prefix);
+    fprintf(f, "\\end{center}\n");
+    fprintf(f, "\n");
+    long long cpgnum = 0;
+    for(i=0;i<19;i++){
+        cpgnum += (long long)covCnt[i];
+    }
+    long long genomebase = hashIntSum(chrHash);
+    double frac = ((double)countCnt[19] / (double)fragbase) / ((double)cpgnum / (double)genomebase);
+    fprintf(f, "\\section{CpG enrichment}\n");
+    fprintf(f, "\\begin{eqnarray*}\n");
+    fprintf(f, "CpG\\ enrichment &= \\frac{CpG\\ count\\ in\\ fragments\\Big/total\\ base\\ of\\ fragments}{CpG\\ count\\ in\\ genome\\Big/total\\ base\\ of\\ genome} \\\\ \n");
+    fprintf(f, "&= \\frac{%lli\\Big/%lli}{%lli\\Big/%lli} \\\\ \n", countCnt[19], fragbase, cpgnum, genomebase);
+    fprintf(f, "&= \\textbf{%.2f}\n", frac);
+    fprintf(f, "\\end{eqnarray*}\n");
+    fprintf(f, "\n");
+    fprintf(f, "\\end{document}\n");
+    carefulClose(&f);
+}
+
+void tex2pdf(char *prefix){
+    char *command;
+    asprintf(&command, "pdflatex %s", prefix);
+    if(system(command) == -1)
+        fprintf(stderr, "failed to call pdflatex for generating PDF report.");
+    if(system(command) == -1) //when there is toc, twice pdflatex needed
+        fprintf(stderr, "failed to call pdflatex for generating PDF report.");
+    //clean stuff
+    char *tf1, *tf2, *tf3, *tf4;
+    if (asprintf(&tf1, "%s.log", prefix) < 0)
+        errAbort("Preparing output wrong");
+    if (asprintf(&tf2, "%s.aux", prefix) < 0)
+        errAbort("Preparing output wrong");
+    if (asprintf(&tf3, "%s.toc", prefix) < 0)
+        errAbort("Preparing output wrong");
+    if (asprintf(&tf4, "%s.tex", prefix) < 0)
+        errAbort("Preparing output wrong");
+    //unlink(tf1);
+    //unlink(tf2);
+    //unlink(tf3);
+    //unlink(tf4);
 }

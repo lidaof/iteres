@@ -1,12 +1,7 @@
-#include "common.h"
-#include "linefile.h"
-#include "hash.h"
-#include "binRange.h"
-#include "basicBed.h"
-#include "bigWig.h"
-#include "obscure.h"
-#include "jksql.h"
 #include "sam.h"
+#include "from_kent.h"
+
+#define ITERES_VERSION "0.3.0-r108"
 
 //struct hold contens from rmsk line
 struct rmsk {
@@ -80,6 +75,8 @@ int nearby_usage();
 int main_nearby(int argc, char *argv[]);
 int density_usage();
 int main_density(int argc, char *argv[]);
+int medip_usage();
+int main_medip(int argc, char *argv[]);
 int cpg_usage();
 int main_cpg(int argc, char *argv[]);
 int cpgstat_usage();
@@ -92,12 +89,14 @@ int main_genomecov(int argc, char *argv[]);
 
 char *get_filename_without_ext(char *filename);
 char *get_filename_ext(char *filename);
+char * texTitleEscape(char *title);
 bool is_file(const char* path); 
 bool is_dir(const char* path);
 double cal_rpkm (unsigned long long int reads_count, unsigned long long int total_length, unsigned long long int mapped_reads_num);
 double cal_rpm (unsigned long long int reads_count, unsigned long long int mapped_reads_num);
 struct lineFile *lineFileOpen2(char *fileName, bool zTerm);
 void writeReport(char *outfile, unsigned long long int *cnt, unsigned int mapQ, char *subfam);
+void plotMappingStat(unsigned long long int *cnt, char *prefix);
 void writeWigandStat(struct hash *hash, struct hash *hash1, struct hash *hash2, char *of1, char *of2, char *of3, char *of4, char *of5, unsigned long long int reads_num, unsigned long int reads_num_unique);
 unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr);
 float getCov(unsigned int aStart, unsigned int aEnd, unsigned int start, unsigned int end);
@@ -121,10 +120,16 @@ void writeFilterOutMRE(struct hash *hash, char *out, char *subfam, double scoreT
 boolean binKeeperAnyInclude(struct binKeeper *bk, int start, int end);
 int binKeeperCpGstat(struct binKeeper *bk, int start, int end);
 void writecpgCount(struct slInt *cpgCount, char *outfile);
+long long * plotcpgCount(struct slInt *Count, char *prefix);
 void writecpgCov(struct hash *cpgHash, char *outfile);
-void writeInsertsize(struct slInt *slPair, char *outfile);
+int * plotcpgCov(struct hash *cpgHash, char *prefix);
+long long writeInsertsize(struct slInt *slPair, char *outfile);
+long long plotInsertsize(struct slInt *slPair, char *prefix);
 struct hash *cpgBed2BinKeeperHash (struct hash *chrHash, char *cpgbedfile);
 unsigned long long int *sam2bedwithCpGstat(char *samfile, char *outbed, struct hash *chrHash, struct hash *cpgHash, struct slInt **cpgCount, struct slInt **slPair, int isSam, unsigned int mapQ, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, int treat);
 struct hash *initGenomeCovHash(struct hash *chrHash);
 void writeGenomeCov(struct hash *cov, char *outfile);
+void plotGenomeCov(struct hash *cov, char *prefix);
 struct hash *calGenomeCovBedGraph(char *chrsize, char *bedgraph);
+void genMeDIPTex(char *prefix, unsigned long long int *cnt, long long fragbase, int *covCnt, long long *countCnt, struct slInt *slPair, struct hash *chrHash, struct hash *cov);
+void tex2pdf(char *prefix);
