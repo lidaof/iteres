@@ -1,7 +1,7 @@
 #include "sam.h"
 #include "from_kent.h"
 
-#define ITERES_VERSION "0.3.0-r108"
+#define ITERES_VERSION "0.3.1-r110"
 
 //struct hold contens from rmsk line
 struct rmsk {
@@ -47,8 +47,8 @@ int stat_usage();
 int main_stat(int argc, char *argv[]);
 int filter_usage();
 int main_filter (int argc, char *argv[]);
-int nearby_usage();
-int main_nearby(int argc, char *argv[]);
+//int nearby_usage();
+//int main_nearby(int argc, char *argv[]);
 int cpgstat_usage();
 int main_cpgstat(int argc, char *argv[]);
 int cpgfilter_usage();
