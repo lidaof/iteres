@@ -7,6 +7,7 @@ int stat_usage(){
     fprintf(stderr, "Options: -S       input is SAM [off]\n");
     fprintf(stderr, "         -Q       unique reads mapping Quality threshold [10]\n");
     fprintf(stderr, "         -c       coverage threshold for overlapping [0.0001]\n");
+    fprintf(stderr, "         -x       discard multi-reads if mapped to different subfamily [on]\n");
     fprintf(stderr, "         -N       normalized by number of (0: reads in repeats, 1: non-redundant reads, 2: mapped reads, 3: total reads) [0])\n");
     fprintf(stderr, "         -U       unique reads normalized by number of (0: unique mapped reads in repeats, 1: unique mapped reads, 2: total reads) [0])\n");
     fprintf(stderr, "         -R       remove redundant reads [off]\n");
@@ -30,7 +31,7 @@ int main_stat (int argc, char *argv[]) {
     
     char *output, *outReport, *outWig, *outbigWig, *outWigUniq, *outbigWigUniq, *outStat, *outFam, *outCla;
     unsigned long long int *cnt;
-    int optSam = 0, optkeepWig = 0, c, optDup = 0, optaddChr = 0, optDis = 0, optTreat = 0, optBed = 0, optBedUniq = 0;
+    int optSam = 0, optkeepWig = 0, c, optDup = 0, optaddChr = 0, optDis = 0, optTreat = 0, optBed = 0, optBedUniq = 0, optdiffSubfam = 1;
     unsigned int optQual = 10, optNorm = 0, optisize = 500, optNorm2 = 0, optExt = 150;
     float optCov = 0.0001;
     char *optoutput = NULL;
@@ -42,11 +43,12 @@ int main_stat (int argc, char *argv[]) {
     struct hash *hashFam = newHash(0);
     struct hash *hashCla = newHash(0);
     start_time = time(NULL);
-    while ((c = getopt(argc, argv, "SQ:c:N:U:RTDwBVCo:E:I:h?")) >= 0) {
+    while ((c = getopt(argc, argv, "SQ:c:xN:U:RTDwBVCo:E:I:h?")) >= 0) {
         switch (c) {
             case 'S': optSam = 1; break;
             case 'Q': optQual = (unsigned int)strtol(optarg, 0, 0); break;
             case 'c': optCov = atof(optarg); break;
+            case 'x': optdiffSubfam = 0; break;
             case 'N': optNorm = (unsigned int)strtol(optarg, 0, 0); break;
             case 'U': optNorm2 = (unsigned int)strtol(optarg, 0, 0); break;
             case 'R': optDup = 1; break;
@@ -142,7 +144,7 @@ int main_stat (int argc, char *argv[]) {
     //    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr);
     //}
     
-    cnt = samFile2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat, outBed, outBedUniq);
+    cnt = samFile2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat, outBed, outBedUniq, optdiffSubfam);
 
     fprintf(stderr, "* Writing stats and Wig file\n");
     writeWigandStat(hashRep, hashFam, hashCla, outStat, outWig, outFam, outCla, outWigUniq, cnt[nindex], cnt[nindex2]);

@@ -131,7 +131,7 @@ int main_filter(int argc, char *argv[]){
     //} else {
     //    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr);
     //}
-    cnt = samFile2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat, NULL, NULL);
+    cnt = samFile2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 1, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat, NULL, NULL, 0);
 
 
     fprintf(stderr, "* Preparing the output file\n");
