@@ -309,6 +309,7 @@ int mapped2diffSubfam(struct hash *hashRmsk, char *subfam, int nm, char *ahstrin
     int numFields = chopByChar(ahstring, ';', row, ArraySize(row));
     for(i=0; i<numFields; i++){
         num2 = chopByChar(row[i], ',', row2, ArraySize(row2));
+        assert(num2 == 4);
         nm2 = (int) strtol(row2[3], 0, 0);
         if (nm2 <= nm){ // hmm..., FIXME?
             start = abs((int)strtol(row2[1], 0, 0));
