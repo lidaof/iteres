@@ -63,9 +63,9 @@ void writeReport(char *outfile, unsigned long long int *cnt, unsigned int mapQ, 
     //fprintf(f, "non-redundant mappable reads (pair): %llu\n", cnt[8]);
     fprintf(f, "uniquely mapped reads (pair) (mapQ >= %u): %llu\n", mapQ, cnt[7]);
     fprintf(f, "non-redundant uniquely mapped reads (pair): %llu\n", cnt[11]);
-    //fprintf(f, "non-redundant reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[9]);
-    fprintf(f, "non-redundant uniquely mapped reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[10]);
-    fprintf(f, "non-redundant uniquely mapped reads (pair) overlap with repeats but discarded due to mapped to different subfamilies: %llu\n", cnt[12]);
+    fprintf(f, "mapped reads (pair) overlap with repeats but discarded due to mapped to different subfamilies: %llu\n", cnt[12]);
+    fprintf(f, "mapped reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[9]);
+    fprintf(f, "uniquely mapped reads (pair) overlap with [%s] repeats: %llu\n", subfam, cnt[10]);
     carefulClose(&f);
 }
 
@@ -306,23 +306,31 @@ int mapped2diffSubfam(struct hash *hashRmsk, char *subfam, int nm, char *ahstrin
     struct binElement *hitList = NULL, *hit;
     //an example string
     //XA:Z:chr9,-69070599,36M,1;chr20,-29616939,36M,1;chr9,+68450226,36M,2;chrUn_gl000219,+94584,36M,2;chrUn_gl000241,+31782,36M,2;
+    //fprintf(stderr, "row %s\n", ahstring);
     int numFields = chopByChar(ahstring, ';', row, ArraySize(row));
     for(i=0; i<numFields; i++){
-        num2 = chopByChar(row[i], ',', row2, ArraySize(row2));
-        assert(num2 == 4);
-        nm2 = (int) strtol(row2[3], 0, 0);
-        if (nm2 <= nm){ // hmm..., FIXME?
-            start = abs((int)strtol(row2[1], 0, 0));
-            end = start + 1; //FIXME
-            struct hashEl *hel2 = hashLookup(hashRmsk,row2[0]);
-            if (hel2 != NULL) {
-                struct binKeeper *bs2 = (struct binKeeper *) hel2->val;
-                hitList = binKeeperFind(bs2, start, end);
-                if(hitList != NULL) {
-                   for (hit = hitList; hit !=NULL; hit = hit->next) {
-                        struct rmsk *ss = (struct rmsk *) hit->val;
-                        if (!sameWord(ss->name, subfam)){
-                            return 1;
+        if (strlen(row[i]) > 0){
+            //fprintf(stderr, "row[i] %s\n", row[i]);
+            num2 = chopByChar(row[i], ',', row2, ArraySize(row2));
+            //if (num2 != 4){
+            //    fprintf(stderr, "num2 %i\n", num2);
+            //    exit(2);
+            //}
+            assert(num2 == 4);
+            nm2 = (int) strtol(row2[3], 0, 0);
+            if (nm2 <= nm){ // hmm..., FIXME?
+                start = abs((int)strtol(row2[1], 0, 0));
+                end = start + 1; //FIXME
+                struct hashEl *hel2 = hashLookup(hashRmsk,row2[0]);
+                if (hel2 != NULL) {
+                    struct binKeeper *bs2 = (struct binKeeper *) hel2->val;
+                    hitList = binKeeperFind(bs2, start, end);
+                    if(hitList != NULL) {
+                        for (hit = hitList; hit !=NULL; hit = hit->next) {
+                            struct rmsk *ss = (struct rmsk *) hit->val;
+                            if (!sameWord(ss->name, subfam)){
+                                return 1;
+                            }
                         }
                     }
                 }
@@ -534,8 +542,11 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
     }
         //remove dup first
         if (rmDup){
-            if (sprintf(key, "%s:%u:%u:%c", chr, start, end, strand) < 0)
-                errAbort("Mem ERROR");
+            //redundant only useful for unique reads
+            if (b->core.qual >= mapQ){
+                if (sprintf(key, "%s:%u:%u:%c", chr, start, end, strand) < 0)
+                    errAbort("Mem ERROR");
+            }
             struct hashEl *hel = hashLookup(dup, key);
             if (hel == NULL) {
                 hashAddInt(dup, key, 1);
@@ -543,7 +554,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                 continue;
             }
         }
-        reads_nonredundant++;
+        //reads_nonredundant++;
         if (b->core.qual >= mapQ)
             reads_nonredundant_unique++;
 
@@ -591,11 +602,13 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                 //filter reads mapped to differetn subfam
                 if (diffSubfam){
                     //filter reads mapped to different subfamiles with same NM
-                    strcpy(ahstring, bam_aux2Z(bam_aux_get(b, "XA")));
-                    nm = bam_aux2i(bam_aux_get(b, "NM"));
-                    if (mapped2diffSubfam(hashRmsk, ss->name, nm, ahstring)){
-                        reads_diff_subfam++;
-                        continue;
+                    if(bam_aux_get(b, "XA")){
+                        strcpy(ahstring, bam_aux2Z(bam_aux_get(b, "XA")));
+                        nm = bam_aux2i(bam_aux_get(b, "NM"));
+                        if (mapped2diffSubfam(hashRmsk, ss->name, nm, ahstring)){
+                            reads_diff_subfam++;
+                            continue;
+                        }
                     }
                 }
                 if (filter == 0){
