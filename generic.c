@@ -300,7 +300,7 @@ float getCov(unsigned int aStart, unsigned int aEnd, unsigned int start, unsigne
     return cov;
 }
 
-int mapped2diffSubfam(struct hash *hashRmsk, char *subfam, int nm, char *ahstring){
+int mapped2diffSubfam(struct hash *hashRmsk, char *subfam, int nm, char *ahstring, int qlen){
     char *row[100], *row2[4];
     int i, nm2, start, end, num2;
     struct binElement *hitList = NULL, *hit;
@@ -320,7 +320,7 @@ int mapped2diffSubfam(struct hash *hashRmsk, char *subfam, int nm, char *ahstrin
             nm2 = (int) strtol(row2[3], 0, 0);
             if (nm2 <= nm){ // hmm..., FIXME?
                 start = abs((int)strtol(row2[1], 0, 0));
-                end = start + 1; //FIXME
+                end = start + qlen; //FIXME
                 struct hashEl *hel2 = hashLookup(hashRmsk,row2[0]);
                 if (hel2 != NULL) {
                     struct binKeeper *bs2 = (struct binKeeper *) hel2->val;
@@ -560,7 +560,11 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
 
         //output bed
         if (outbed_f)
-            fprintf(outbed_f, "%s\t%u\t%u\t%s\t%i\t%c\n", chr, start, end, bam1_qname(b), b->core.qual, strand);
+            fprintf(outbed_f, "%s\t%u\t%u\t%s\t%i\t%c", chr, start, end, bam1_qname(b), b->core.qual, strand);
+            if(bam_aux_get(b, "XA")){
+                fprintf(outbed_f, "\t%i\t%s", bam_aux2i(bam_aux_get(b, "NM")), bam_aux2Z(bam_aux_get(b, "XA")) );
+            }
+            fprintf(outbed_f, "\n");
         if (outbed_unique_f){
             if(b->core.qual >= mapQ)
                 fprintf(outbed_unique_f, "%s\t%u\t%u\t%s\t%i\t%c\n", chr, start, end, bam1_qname(b), b->core.qual, strand);
@@ -605,7 +609,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                     if(bam_aux_get(b, "XA")){
                         strcpy(ahstring, bam_aux2Z(bam_aux_get(b, "XA")));
                         nm = bam_aux2i(bam_aux_get(b, "NM"));
-                        if (mapped2diffSubfam(hashRmsk, ss->name, nm, ahstring)){
+                        if (mapped2diffSubfam(hashRmsk, ss->name, nm, ahstring, (int)qlen)){
                             reads_diff_subfam++;
                             continue;
                         }
