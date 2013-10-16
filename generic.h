@@ -1,7 +1,7 @@
 #include "sam.h"
 #include "from_kent.h"
 
-#define ITERES_VERSION "0.3.2-r120"
+#define ITERES_VERSION "0.3.2-r121"
 
 //struct hold contens from rmsk line
 struct rmsk {

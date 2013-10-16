@@ -559,15 +559,17 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
             reads_nonredundant_unique++;
 
         //output bed
-        if (outbed_f)
+        if (outbed_f){
             fprintf(outbed_f, "%s\t%u\t%u\t%s\t%i\t%c", chr, start, end, bam1_qname(b), b->core.qual, strand);
             if(bam_aux_get(b, "XA")){
                 fprintf(outbed_f, "\t%i\t%s", bam_aux2i(bam_aux_get(b, "NM")), bam_aux2Z(bam_aux_get(b, "XA")) );
             }
             fprintf(outbed_f, "\n");
+        }
         if (outbed_unique_f){
-            if(b->core.qual >= mapQ)
+            if(b->core.qual >= mapQ){
                 fprintf(outbed_unique_f, "%s\t%u\t%u\t%s\t%i\t%c\n", chr, start, end, bam1_qname(b), b->core.qual, strand);
+            }
         }
 
         //transfer coordinates
