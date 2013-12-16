@@ -485,7 +485,7 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
                             int tmpend = start + b->core.isize;
                             end = min(cend, (unsigned int)tmpend);
                         }else{
-                            start = (unsigned int) b->core.pos;
+                            start = (unsigned int) b->core.mpos;
                             strand = '-';
                             int tmpend = start - b->core.isize;
                             end = min(cend, (unsigned int)tmpend);
@@ -907,7 +907,7 @@ unsigned long long int *sam2bed(char *samfile, char *outbed, struct hash *chrHas
                             int tmpend = start + b->core.isize;
                             end = min(cend, (unsigned int)tmpend);
                         }else{
-                            start = (unsigned int) b->core.pos;
+                            start = (unsigned int) b->core.mpos;
                             strand = '-';
                             int tmpend = start - b->core.isize;
                             end = min(cend, (unsigned int)tmpend);
