@@ -3,7 +3,7 @@
 int stat_usage(){
     fprintf(stderr, "\n");
     fprintf(stderr, "Obtain alignment statistics for each repeat subfamily, family and class.\n\n");
-    fprintf(stderr, "Usage:   iteres stat [options] <chromosome size file> <repeat size file> <rmsk.txt> <bam/sam alignment file>\n\n");
+    fprintf(stderr, "Usage:   iteres stat [options] <chromosome size file> <repeat size file> <rmsk.txt> <bam/sam alignment file1,file2,file3...>\n\n");
     fprintf(stderr, "Options: -S       input is SAM [off]\n");
     fprintf(stderr, "         -Q       unique reads mapping Quality threshold [10]\n");
     fprintf(stderr, "         -c       coverage threshold for overlapping [0.0001]\n");
@@ -29,7 +29,7 @@ int stat_usage(){
 /* main stat function */
 int main_stat (int argc, char *argv[]) {
     
-    char *output, *outReport, *outWig, *outbigWig, *outWigUniq, *outbigWigUniq, *outStat, *outFam, *outCla;
+    char *output, *outReport, *outWig, *outbigWig, *outWigUniq, *outbigWigUniq, *outStat, *outFam, *outCla, *row[100], *samfilecopy;
     unsigned long long int *cnt;
     int optSam = 0, optkeepWig = 0, c, optDup = 0, optaddChr = 0, optDis = 0, optTreat = 0, optBed = 0, optBedUniq = 0, optdiffSubfam = 1;
     unsigned int optQual = 10, optNorm = 0, optisize = 500, optNorm2 = 0, optExt = 150;
@@ -74,10 +74,14 @@ int main_stat (int argc, char *argv[]) {
     char *rmsk_file = argv[optind+2];
     char *sam_file = argv[optind+3];
     
+    samfilecopy = cloneString(sam_file);
+    int numFields = chopByChar(samfilecopy, ',', row, ArraySize(row));
+    fprintf(stderr, "* Provided %i BAM/SAM file(s)\n", numFields);
+    
     if(optoutput) {
         output = optoutput;
     } else {
-        output = cloneString(get_filename_without_ext(basename(sam_file)));
+        output = cloneString(get_filename_without_ext(basename(row[0])));
     }
     
     if(asprintf(&outWig, "%s.iteres.wig", output) < 0)
@@ -144,7 +148,7 @@ int main_stat (int argc, char *argv[]) {
     //    cnt = samFile2nodupRepbedFile(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr);
     //}
     
-    cnt = samFile2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat, outBed, outBedUniq, optdiffSubfam);
+    cnt = samFiles2nodupRepbedFileNew(sam_file, chrHash, hashRmsk, hashRep, hashFam, hashCla, optSam, optQual, 0, optDup, optaddChr, optDis, optisize, optExt, optCov, optTreat, outBed, outBedUniq, optdiffSubfam);
 
     fprintf(stderr, "* Writing stats and Wig file\n");
     writeWigandStat(hashRep, hashFam, hashCla, outStat, outWig, outFam, outCla, outWigUniq, cnt[nindex], cnt[nindex2]);

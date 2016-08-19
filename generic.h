@@ -1,7 +1,7 @@
 #include "sam.h"
 #include "from_kent.h"
 
-#define ITERES_VERSION "0.3.2-r122"
+#define ITERES_VERSION "0.3.3-r123"
 
 //struct hold contens from rmsk line
 struct rmsk {
@@ -70,6 +70,7 @@ unsigned long long int *samFile2nodupRepbedFile(char *samfile, struct hash *chrH
 float getCov(unsigned int aStart, unsigned int aEnd, unsigned int start, unsigned int end);
 int mapped2diffSubfam(struct hash *hashRmsk, char *subfam, int nm, char *ahstring, int qlen);
 unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, float minCoverage, int treat, char *outbed, char *outbed_unique, int diffSubfam);
+unsigned long long int *samFiles2nodupRepbedFileNew(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, float minCoverage, int treat, char *outbed, char *outbed_unique, int diffSubfam);
 unsigned long long int *PEsamFile2nodupRepbedFile(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, unsigned int iSize);
 void freermsk(struct rmsk *s);
 void rmsk2binKeeperHash(char *rmskfile, struct hash *chrHash, struct hash *repHash, struct hash **hashRmsk, struct hash **hashRep, struct hash **hashFam, struct hash **hashCla, int filterField, char *filterName);

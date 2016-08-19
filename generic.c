@@ -696,6 +696,371 @@ unsigned long long int *samFile2nodupRepbedFileNew(char *samfile, struct hash *c
     return cnt;
 }
 
+//support many bam files
+unsigned long long int *samFiles2nodupRepbedFileNew(char *samfile, struct hash *chrHash, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int isSam, unsigned int mapQ, int filter, int rmDup, int addChr, int discardWrongEnd, unsigned int iSize, unsigned int extension, float minCoverage, int treat, char *outbed, char *outbed_unique, int diffSubfam) {
+    FILE *outbed_f = NULL, *outbed_unique_f = NULL;
+    char chr[100], key[100], strand, ahstring[2000], *row[100];
+    int nm, fi;
+    unsigned int start, end, cend, rstart, rend;
+    unsigned long long int *cnt = malloc(sizeof(unsigned long long int) * 13);
+    //unsigned long long int mapped_reads_num = 0, reads_num = 0, reads_used = 0, unique_reads = 0, repeat_reads = 0;
+    unsigned long long int read_end1 = 0, read_end2 = 0;
+    unsigned long long int read_end1_mapped = 0, read_end2_mapped = 0;
+    unsigned long long int read_end1_used = 0, read_end2_used = 0;
+    unsigned long long int reads_nonredundant = 0;
+    unsigned long long int reads_nonredundant_unique = 0;
+    unsigned long long int reads_mapped = 0;
+    unsigned long long int reads_mapped_unique = 0;
+    unsigned long long int reads_repeat = 0;
+    unsigned long long int reads_repeat_unique = 0;
+    unsigned long long int reads_diff_subfam = 0;
+    struct hash *nochr = newHash(0), *dup = newHash(0);
+    if (outbed != NULL){
+        outbed_f = mustOpen(outbed, "w");
+    }
+    if (outbed_unique != NULL){
+        outbed_unique_f = mustOpen(outbed_unique, "w");
+    }
+    //process bam
+    int numFields = chopByChar(samfile, ',', row, ArraySize(row));
+    for(fi = 0; fi < numFields; fi++){
+        fprintf(stderr, "\n* Processing %s\n", row[fi]);
+        samfile_t *samfp;
+        if (isSam) {
+            if ( (samfp = samopen(row[fi], "r", 0)) == 0) {
+                fprintf(stderr, "Fail to open SAM file %s\n", samfile);
+                errAbort("Error\n");
+            }
+        } else {
+            if ( (samfp = samopen(row[fi], "rb", 0)) == 0) {
+                fprintf(stderr, "Fail to open BAM file %s\n", samfile);
+                errAbort("Error\n");
+            }
+        }
+        //strcpy(prn, "empty");
+        bam1_t *b;
+        bam_header_t *h;
+        h = samfp->header;
+        b = bam_init1();
+        while ( samread(samfp, b) >= 0) {
+            //if ( sameString (bam1_qname(b), prn)) 
+            //    continue;
+            if (b->core.flag & BAM_FPAIRED) {
+                if (b->core.flag & BAM_FREAD1){
+                    read_end1++;
+                }else{
+                    if(treat)
+                        read_end1++;
+                    else
+                        read_end2++;
+                }
+            }else{
+                read_end1++;
+            }
+            if (((read_end1 + read_end2) % 100000) == 0)
+                fprintf(stderr, "\r* Processed read ends: %llu", (read_end1 + read_end2));
+            //strcpy(prn, bam1_qname(b));
+            //if (b->core.tid < 0)
+            if (b->core.flag & BAM_FUNMAP)
+                continue;
+            //if (b->core.qual < mapQ)
+            //    continue;
+            if (b->core.flag & BAM_FPAIRED) {
+                if (b->core.flag & BAM_FREAD1){
+                    read_end1_mapped++;
+                }else{
+                    if (treat)
+                        read_end1_mapped++;
+                    else
+                        read_end2_mapped++;
+                }
+            }else{
+                read_end1_mapped++;
+            }
+            //change chr name to chr1, chr2 ...
+            strcpy(chr, h->target_name[b->core.tid]);
+            if (addChr){
+                if (startsWith("GL", h->target_name[b->core.tid])) {
+                    continue;
+                } else if (sameWord(h->target_name[b->core.tid], "MT")) {
+                    strcpy(chr,"chrM");
+                } else if (!startsWith("chr", h->target_name[b->core.tid])) {
+                    strcpy(chr, "chr");
+                    strcat(chr, h->target_name[b->core.tid]);
+                }
+            }
+            //check Ref reads mapped to existed in chromosome size file or not
+            struct hashEl *he = hashLookup(nochr, chr);
+            if (he != NULL)
+                continue;
+            cend = (unsigned int) (hashIntValDefault(chrHash, chr, 2) - 1);
+            if (cend == 1){
+                hashAddInt(nochr, chr, 1);
+                warn("* Warning: read ends mapped to chromosome %s will be discarded as %s not existed in the chromosome size file", chr, chr);
+                continue;
+            }
+            if (b->core.flag & BAM_FPAIRED) {
+                if (b->core.flag & BAM_FREAD1){
+                    read_end1_used++;
+                }else{
+                    if (treat)
+                        read_end1_used++;
+                    else
+                        read_end2_used++;
+                }
+            }else{
+                read_end1_used++;
+            }
+            //get mapping location for paired-end or single-end
+            if (treat){
+                reads_mapped++;
+                if (b->core.qual >= mapQ)
+                    reads_mapped_unique++;
+                start = (unsigned int) b->core.pos;
+                int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + b->core.l_qseq;
+                end = min(cend, (unsigned int)tmpend);
+                strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
+                if (extension) {
+                    if (strand == '+'){
+                        end = min(start + extension, cend);
+                    }else{
+                        if (end < extension)
+                            start = 0;
+                        else
+                            start = end - extension;
+                        //start = max(end - extension, 0);
+                    }
+                }
+
+            }else{
+            if (b->core.flag & BAM_FPAIRED) {
+                if (!(b->core.flag & BAM_FMUNMAP)){
+                    if (b->core.flag & BAM_FREAD1){
+                        if (abs(b->core.isize) > iSize || b->core.isize == 0){
+                            continue;
+                        }else{
+                            reads_mapped++;
+                            if (b->core.qual >= mapQ)
+                                reads_mapped_unique++;
+                            if (b->core.isize > 0){
+                                start = (unsigned int) b->core.pos;
+                                strand = '+';
+                                int tmpend = start + b->core.isize;
+                                end = min(cend, (unsigned int)tmpend);
+                            }else{
+                                start = (unsigned int) b->core.mpos;
+                                strand = '-';
+                                int tmpend = start - b->core.isize;
+                                end = min(cend, (unsigned int)tmpend);
+                            }
+                    
+                        }
+                    }else{
+                        continue;
+                    }
+                }else{
+                    if (discardWrongEnd){
+                        continue;
+                    }else{
+                        reads_mapped++;
+                        if (b->core.qual >= mapQ)
+                            reads_mapped_unique++;
+                        start = (unsigned int) b->core.pos;
+                        int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + b->core.l_qseq;
+                        end = min(cend, (unsigned int)tmpend);
+                        strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
+                        if (extension) {
+                            if (strand == '+'){
+                                end = min(start + extension, cend);
+                            }else{
+                                if (end < extension)
+                                    start = 0;
+                                else
+                                    start = end - extension;
+                                //start = max(end - extension, 0);
+                            }
+                        }
+                    }
+                }
+            }else{
+                reads_mapped++;
+                if (b->core.qual >= mapQ)
+                    reads_mapped_unique++;
+                start = (unsigned int) b->core.pos;
+                int tmpend = b->core.n_cigar? bam_calend(&b->core, bam1_cigar(b)) : b->core.pos + b->core.l_qseq;
+                end = min(cend, (unsigned int)tmpend);
+                strand = (b->core.flag&BAM_FREVERSE)? '-' : '+';
+                if (extension) {
+                    if (strand == '+'){
+                        end = min(start + extension, cend);
+                    }else{
+                        if (end < extension)
+                            start = 0;
+                        else
+                            start = end - extension;
+                        //start = max(end - extension, 0);
+                    }
+                }
+            }
+        }
+            //remove dup first
+            if (rmDup){
+                //redundant only useful for unique reads
+                if (b->core.qual >= mapQ){
+                    if (sprintf(key, "%s:%u:%u:%c", chr, start, end, strand) < 0)
+                        errAbort("Mem ERROR");
+                }
+                struct hashEl *hel = hashLookup(dup, key);
+                if (hel == NULL) {
+                    hashAddInt(dup, key, 1);
+                } else {
+                    continue;
+                }
+            }
+            //reads_nonredundant++;
+            if (b->core.qual >= mapQ)
+                reads_nonredundant_unique++;
+
+            //output bed
+            if (outbed_f){
+                fprintf(outbed_f, "%s\t%u\t%u\t%s\t%i\t%c", chr, start, end, bam1_qname(b), b->core.qual, strand);
+                if(bam_aux_get(b, "XA")){
+                    fprintf(outbed_f, "\t%i\t%s", bam_aux2i(bam_aux_get(b, "NM")), bam_aux2Z(bam_aux_get(b, "XA")) );
+                }
+                fprintf(outbed_f, "\n");
+            }
+            if (outbed_unique_f){
+                if(b->core.qual >= mapQ){
+                    fprintf(outbed_unique_f, "%s\t%u\t%u\t%s\t%i\t%c\n", chr, start, end, bam1_qname(b), b->core.qual, strand);
+                }
+            }
+
+            //transfer coordinates
+            int i, j;
+            int index = 0, tindex = 0;
+            float coverage = 0.0, tcoverage = 0.0;
+            unsigned int qlen = end - start;
+            struct rmsk *ss = NULL;
+            struct binElement *hitList = NULL, *hit;
+            struct hashEl *hel2 = hashLookup(hashRmsk, chr);
+            if (hel2 != NULL) {
+                struct binKeeper *bs2 = (struct binKeeper *) hel2->val;
+                hitList = binKeeperFind(bs2, start, end);
+                if(hitList != NULL) {
+                    for (hit = hitList; hit !=NULL; hit = hit->next) {
+                        index++;
+                        struct rmsk *sss = (struct rmsk *) hit->val;
+                        float cov = getCov(start, end, sss->start, sss->end);
+                        //fprintf(stderr, "coverage: %.2f\n", cov);
+                        if (cov > coverage){
+                            tindex = index;
+                            tcoverage = cov;
+                        }
+                        coverage = cov;
+                    }
+                    if (tcoverage < minCoverage)
+                        continue;
+                    index = 0;
+                    for (hit = hitList; hit !=NULL; hit = hit->next) {
+                        index++;
+                        if (index == tindex){
+                            ss = (struct rmsk *) hit->val;
+                            break;
+                        }
+                    }
+                    //filter reads mapped to differetn subfam
+                    if (diffSubfam){
+                        //filter reads mapped to different subfamiles with same NM
+                        if(bam_aux_get(b, "XA")){
+                            strcpy(ahstring, bam_aux2Z(bam_aux_get(b, "XA")));
+                            nm = bam_aux2i(bam_aux_get(b, "NM"));
+                            if (mapped2diffSubfam(hashRmsk, ss->name, nm, ahstring, (int)qlen)){
+                                reads_diff_subfam++;
+                                continue;
+                            }
+                        }
+                    }
+                    if (filter == 0){
+                        struct hashEl *hel3 = hashLookup(hashRep, ss->name);
+                        if (hel3 != NULL){
+                            struct rep *rs = (struct rep *) hel3->val;
+                            rs->read_count++;
+                            if (b->core.qual >= mapQ)
+                                rs->read_count_unique++;
+                            if (rs->length != 0){
+                                rstart = start - ss->start;
+                                rstart = (rstart < 0) ? 0 : rstart;
+                                rend = rstart + qlen;
+                                rend = (rend < ss->end) ? rend : ss->end;
+                                for (i = rstart; i < rend; i++) {
+                                    j = i + ss->consensus_start;
+                                    if (j >= ss->consensus_end) {
+                                        break;
+                                    }
+                                    if (j >= rs->length) {
+                                        break;
+                                    }
+                                    (rs->bp_total)[j]++;
+                                    if (b->core.qual >= mapQ)
+                                        (rs->bp_total_unique)[j]++;
+                                }
+                            }
+                        }
+                        //fill hashFam
+                        struct hashEl *hel4 = hashLookup(hashFam, ss->fname);
+                        if (hel4 != NULL) {
+                            struct repfam *fs = (struct repfam *) hel4->val;
+                            fs->read_count++;
+                            if (b->core.qual >= mapQ)
+                                fs->read_count_unique++;
+                        }
+                        //fill hashCla
+                        struct hashEl *hel5 = hashLookup(hashCla, ss->cname);
+                        if (hel5 != NULL) {
+                            struct repcla *cs = (struct repcla *) hel5->val;
+                            cs->read_count++;
+                            if (b->core.qual >= mapQ)
+                                cs->read_count_unique++;
+                        }
+                    } else {
+                        slNameAddHead(&(ss->sl), bam1_qname(b));
+                        if (b->core.qual >= mapQ)
+                            slNameAddHead(&(ss->sl_unique), bam1_qname(b));
+                    }
+                    reads_repeat++;
+                    if (b->core.qual >= mapQ)
+                        reads_repeat_unique++;
+                    slFreeList(hitList);
+                }
+            }
+        }
+        fprintf(stderr, "\r* Processed read ends: %llu\n", (read_end1 + read_end2));
+        samclose(samfp);
+        bam_destroy1(b);
+    }
+    //process bam ends
+    freeHash(&nochr);
+    freeHash(&dup);
+    if (outbed_f)
+        carefulClose(&outbed_f);
+    if (outbed_unique_f)
+        carefulClose(&outbed_unique_f);
+    cnt[0] = read_end1;
+    cnt[1] = read_end2;
+    cnt[2] = read_end1_mapped;
+    cnt[3] = read_end2_mapped;
+    cnt[4] = read_end1_used;
+    cnt[5] = read_end2_used;
+    cnt[6] = reads_mapped;
+    cnt[7] = reads_mapped_unique;
+    cnt[8] = reads_nonredundant;
+    cnt[9] = reads_repeat;
+    cnt[10] = reads_repeat_unique;
+    cnt[11] = reads_nonredundant_unique;
+    cnt[12] = reads_diff_subfam;
+    return cnt;
+}
+
 void cpgBedGraphOverlapRepeat(char *cpgBedGraphFile, struct hash *hashRmsk, struct hash *hashRep, struct hash *hashFam, struct hash *hashCla, int filter) {
     struct lineFile *infileStream = lineFileOpen2(cpgBedGraphFile, TRUE);
     char *row[20], *line;
